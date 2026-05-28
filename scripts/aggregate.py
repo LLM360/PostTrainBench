@@ -106,15 +106,9 @@ def compute_weighted_metric(
     total = 0.0
     num_models = len(data)
     for bench in sorted(valid_benchmarks):
-        values = []
-        for model in data:
-            val_str = data[model].get(bench, "")
-            if val_str == "":
-                continue
-            values.append(float(val_str))
-        if values:
-            avg_value = sum(values) / num_models
-            total += avg_value * factors[bench]
+        values = [float(data[model][bench]) for model in data]
+        avg_value = sum(values) / num_models
+        total += avg_value * factors[bench]
     return total
 
 

@@ -42,11 +42,35 @@ def find_hf_model_folders(root_dir):
     for exp_dir in root_path.glob("experiments/exp_*"):
         skip_paths.add((exp_dir / "final_model").resolve())
 
+    def contains_protected_path(candidate):
+        """Return the protected path if `candidate` is an ancestor of (or
+        equal to) any protected dir, else None. Prevents the
+        ancestor-bypass where e.g. experiments/exp_001/ matches the
+        HF-model heuristic at its root and shutil.rmtree() would take the
+        protected child along with it."""
+        cand = Path(candidate).resolve()
+        for p in skip_paths:
+            try:
+                p.relative_to(cand)
+            except ValueError:
+                continue
+            return p
+        return None
+
     for dirpath, dirnames, filenames in os.walk(root_path):
         if Path(dirpath).resolve() in skip_paths:
             dirnames.clear()
             continue
         if is_hf_model_folder(dirpath):
+            blocked_by = contains_protected_path(dirpath)
+            if blocked_by is not None:
+                print(
+                    f"Skipping {dirpath}: contains protected path "
+                    f"{blocked_by} (would remove agent's final_model)"
+                )
+                # Keep walking into children so we can clean up unprotected
+                # siblings of the protected dir (don't clear dirnames).
+                continue
             model_folders.append(dirpath)
             # Don't traverse into model folders
             dirnames.clear()

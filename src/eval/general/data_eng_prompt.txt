@@ -9,22 +9,22 @@ Your only variable is the dataset you construct.
 
 ## Objective
 Construct one or more training datasets, audit each, and train with the locked recipe.
-Store your best model in the folder \`final_model\` (just symlink the chosen experiment's \`final_model/\` into place).
+Store your best model in the folder \`final_model\` (copy — not symlink — the chosen experiment's \`final_model/\` into place; see step 7).
 Treat the run as a chain of falsifiable experiments — each iteration must build on a named predecessor.
 
 ## What you can read
-- \`task/benchmark_overview.md\` — what the benchmark is and what good training data looks like.
-- \`task/evaluate.py\` — read-only. The benchmark scorer.
+- \`benchmark_overview.md\` — what the benchmark is and what good training data looks like.
+- \`evaluate.py\` — read-only. The benchmark scorer.
 - \`$SHARED_LOG_CSV\` — peer agents' experiment rows (strategy + audit metrics + hypothesis/conclusion). Re-read at every iteration.
 - \`/shared_log/promoted/<dataset_sha256>.jsonl\` — data files from prior promoted experiments. You MAY fork these. No other \`/shared_log/\` content is readable.
 - Anything you can fetch from the internet or Hugging Face Hub.
 
 ## What you can run
 - \`bash timer.sh\` — remaining time (hh:mm).
-- \`python task/dataset_audit.py --data-path <jsonl>\` — **mandatory** hard gate. Fails on test-set contamination or low diversity.
-- \`python task/train_sft.py --data-path <jsonl> --output-dir experiments/exp_<N>/final_model\` — locked recipe. Whitelisted args only: \`--data-path\`, \`--output-dir\`, \`--max-steps\`, \`--seed\`. (\`$MODEL_TO_TRAIN\` is fixed; no \`--base-model\` flag.)
-- \`python task/publish_experiment.py --exp-dir experiments/exp_<N>/ [--data-sources "..."] [--promoted | --audit-failed]\` — appends one row to \`$SHARED_LOG_CSV\` and to \`experiments/index.csv\`.
-- \`python task/evaluate.py --model-path <path> --limit 5 --max-tokens 512\` — small qualitative probe. **Do not use this to optimize against the test set.** Delete the resulting metrics file before publishing so it never enters the archive.
+- \`python dataset_audit.py --data-path <jsonl>\` — **mandatory** hard gate. Fails on test-set contamination or low diversity.
+- \`python train_sft.py --data-path <jsonl> --output-dir experiments/exp_<N>/final_model\` — locked recipe. Whitelisted args only: \`--data-path\`, \`--output-dir\`, \`--max-steps\`, \`--seed\`. (\`$MODEL_TO_TRAIN\` is fixed; no \`--base-model\` flag.)
+- \`python publish_experiment.py --exp-dir experiments/exp_<N>/ [--data-sources "..."] [--promoted | --audit-failed]\` — appends one row to \`$SHARED_LOG_CSV\` and to \`experiments/index.csv\`.
+- \`python evaluate.py --model-path <path> --limit 5 --max-tokens 512\` — small qualitative probe. **Do not use this to optimize against the test set.** Delete the resulting metrics file before publishing so it never enters the archive.
 
 ## Teacher vLLM endpoint (for synthetic data)
 An OpenAI-compatible endpoint is available:
@@ -74,16 +74,16 @@ For each experiment exp_<N>:
    <OPTIONAL. Required only when Parent=none on exp_002+. Explain why no prior experiment was a valid base.>
    \`\`\`
 
-4. **EXECUTE.** Mine HF (\`huggingface_hub.HfApi().list_datasets(search=...)\`, \`datasets.load_dataset(...)\`) → (optional) synthesize via \`$TEACHER_VLLM_URL\` with diverse prompts → format as messages-jsonl (\`{"messages": [{"role": "user", ...}, {"role": "assistant", ...}]}\`, optional leading system message) → **AUDIT** (mandatory: \`python task/dataset_audit.py --data-path experiments/exp_<N>/data.jsonl\`). If audit fails, either fix and retry OR \`publish_experiment.py --audit-failed\` to record the disproven hypothesis and move on.
+4. **EXECUTE.** Mine HF (\`huggingface_hub.HfApi().list_datasets(search=...)\`, \`datasets.load_dataset(...)\`) → (optional) synthesize via \`$TEACHER_VLLM_URL\` with diverse prompts → format as messages-jsonl (\`{"messages": [{"role": "user", ...}, {"role": "assistant", ...}]}\`, optional leading system message) → **AUDIT** (mandatory: \`python dataset_audit.py --data-path experiments/exp_<N>/data.jsonl\`). If audit fails, either fix and retry OR \`publish_experiment.py --audit-failed\` to record the disproven hypothesis and move on.
 
-5. **TRAIN.** \`python task/train_sft.py --data-path experiments/exp_<N>/data.jsonl --output-dir experiments/exp_<N>/final_model\`.
+5. **TRAIN.** \`python train_sft.py --data-path experiments/exp_<N>/data.jsonl --output-dir experiments/exp_<N>/final_model\`.
 
 6. **PROBE & WRITE CONCLUSION.** Two-tier probe:
-   - **Format probe (n=5, ~30s):** \`python task/evaluate.py --model-path experiments/exp_<N>/final_model --limit 5 --max-tokens 512 --json-output-file /tmp/format_probe.json\`. Read the inspect_ai log to inspect generation length and whether it stops cleanly after \`ANSWER: X\`.
-   - **Quality probe (n=30, ~3 min):** ONLY if format probe shows clean stopping. \`python task/evaluate.py --model-path experiments/exp_<N>/final_model --limit 30 --max-tokens 1500 --json-output-file /tmp/quality_probe.json\`. Read the inspect_ai per-sample completions to see if the model is reasoning or guessing. n=30 is the smallest sample that lets you observe behavioral differences reliably; n=5 is essentially noise.
+   - **Format probe (n=5, ~30s):** \`python evaluate.py --model-path experiments/exp_<N>/final_model --limit 5 --max-tokens 512 --json-output-file /tmp/format_probe.json\`. Read the inspect_ai log to inspect generation length and whether it stops cleanly after \`ANSWER: X\`.
+   - **Quality probe (n=30, ~3 min):** ONLY if format probe shows clean stopping. \`python evaluate.py --model-path experiments/exp_<N>/final_model --limit 30 --max-tokens 1500 --json-output-file /tmp/quality_probe.json\`. Read the inspect_ai per-sample completions to see if the model is reasoning or guessing. n=30 is the smallest sample that lets you observe behavioral differences reliably; n=5 is essentially noise.
    Update \`## Conclusion\` in notes.md based on what you observed. **Do not write numeric scores** — describe behavior. Delete both probe files (\`rm -f /tmp/format_probe.json /tmp/quality_probe.json\`) and any inspect_ai logs they produced so they don't leak into the archive.
 
-7. **PUBLISH.** \`python task/publish_experiment.py --exp-dir experiments/exp_<N>/ [--data-sources "<hf_id1>,<hf_id2>,synthetic"] [--promoted | --audit-failed]\`. Promoted means you're symlinking this exp's final_model as the run's final_model: \`ln -sfn experiments/exp_<N>/final_model final_model\`.
+7. **PUBLISH.** \`python publish_experiment.py --exp-dir experiments/exp_<N>/ [--data-sources "<hf_id1>,<hf_id2>,synthetic"] [--promoted | --audit-failed]\`. Promoted means you've copied this exp's final_model as the run's final_model: \`rm -rf final_model && cp -r experiments/exp_<N>/final_model final_model\`. (Do NOT use \`ln -sfn\` — the wrapper expects \`final_model/\` to be a real directory.)
 
 Then NEXT iteration: exp_<N+1>'s parent is usually exp_<N> unless your conclusion makes you want to pivot to a different ancestor.
 

@@ -81,6 +81,12 @@ def load_rows(path: Path) -> list[dict]:
 
 
 def extract_user_content(row: dict, row_idx: int) -> str:
+    """Return only the user-turn content. Used for diversity metrics.
+
+    Diversity is computed on user turns only because including assistant-side
+    rationales would artificially inflate distinct-ngram ratios and skew length
+    statistics.
+    """
     if "messages" not in row:
         raise SystemExit(f"row {row_idx}: missing 'messages' key")
     msgs = row["messages"]
@@ -93,6 +99,23 @@ def extract_user_content(row: dict, row_idx: int) -> str:
     if not has_asst:
         raise SystemExit(f"row {row_idx}: no assistant message found")
     parts = [str(m.get("content", "")) for m in user_msgs]
+    return "\n".join(parts)
+
+
+def extract_all_content(row: dict, row_idx: int) -> str:
+    """Return concatenated content of EVERY message (user + assistant + system).
+
+    Decontamination runs on this combined string so a contaminated row cannot
+    hide the benchmark text by placing it in a system or assistant turn.
+    Schema validation (presence of 'messages', a user turn, an assistant turn)
+    is delegated to extract_user_content() which we still call per row.
+    """
+    if "messages" not in row:
+        raise SystemExit(f"row {row_idx}: missing 'messages' key")
+    msgs = row["messages"]
+    if not isinstance(msgs, list):
+        raise SystemExit(f"row {row_idx}: 'messages' must be a list")
+    parts = [str(m.get("content", "")) for m in msgs]
     return "\n".join(parts)
 
 
@@ -116,15 +139,20 @@ def load_test_decontam(path: Path) -> tuple[set[str], dict[str, list[str]]]:
 
 
 def check_decontam(rows: list[dict], test_path: Path) -> dict:
+    """Scan ALL message turns (user + assistant + system) against the test set.
+
+    A contaminated row can hide the benchmark text in a system or assistant
+    message; scanning only the user turn would let that slip past the gate.
+    """
     sha_set, shingle_index = load_test_decontam(test_path)
     violations: list[dict] = []
     for i, row in enumerate(rows):
-        user = extract_user_content(row, i)
-        norm = normalize(user)
+        combined = extract_all_content(row, i)
+        norm = normalize(combined)
         row_sha = sha256_hex(norm)
         if row_sha in sha_set:
             violations.append(
-                {"row": i, "kind": "sha256_exact", "first_80": user[:80]}
+                {"row": i, "kind": "sha256_exact", "first_80": combined[:80]}
             )
             if len(violations) >= MAX_REPORTED_VIOLATIONS:
                 break
@@ -145,7 +173,7 @@ def check_decontam(rows: list[dict], test_path: Path) -> dict:
                         "test_id": tid,
                         "overlap": overlap,
                         "threshold": DECONTAM_SHINGLE_OVERLAP_MIN,
-                        "first_80": user[:80],
+                        "first_80": combined[:80],
                     }
                 )
                 if len(violations) >= MAX_REPORTED_VIOLATIONS:
@@ -155,6 +183,7 @@ def check_decontam(rows: list[dict], test_path: Path) -> dict:
         "violations": violations,
         "test_items_loaded": len(sha_set),
         "shingle_overlap_threshold": DECONTAM_SHINGLE_OVERLAP_MIN,
+        "scope": "all_messages",
     }
 
 
@@ -227,8 +256,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--data-path", required=True, help="Training data JSONL (messages schema).")
     p.add_argument(
         "--test-decontam",
-        default="task_context/test_decontam.jsonl",
-        help="Path to test_decontam.jsonl shipped in task_context/.",
+        default="test_decontam.jsonl",
+        help=(
+            "Path to test_decontam.jsonl. Defaults to the file in the current "
+            "working directory because run_task.sh flattens task_context/* into "
+            "the agent's task root."
+        ),
     )
     p.add_argument(
         "--report-path",

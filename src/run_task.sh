@@ -25,6 +25,16 @@ export EVAL_DIR="${POST_TRAIN_BENCH_RESULTS_DIR}/${AGENT}_${AGENT_CONFIG_SAFE}_$
 
 mkdir -p ${EVAL_DIR}
 
+# Resolve EVAL_DIR to an absolute path defensively. The evaluator at the
+# bottom of this script runs with `--pwd src/eval/tasks/${EVALUATION_TASK}`,
+# so any later code path that joins EVAL_DIR with a relative segment (e.g.
+# "$EVAL_DIR/final_model") would otherwise look under
+# src/eval/tasks/.../$EVAL_DIR instead of the repo-root results/...
+# Idempotent: realpath on an already-absolute path is a no-op, so this is
+# safe to land alongside PR #3's broader fix.
+EVAL_DIR="$(realpath "$EVAL_DIR")"
+export EVAL_DIR
+
 exec 1>${EVAL_DIR}/output.log
 exec 2>${EVAL_DIR}/error.log
 

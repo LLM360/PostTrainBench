@@ -3,13 +3,17 @@
 
 Loads `Idavidrein/gpqa::gpqa_main::train` (the slice scored by the harness;
 yes, GPQA's eval split is named "train"), normalizes every question, and
-writes two artifacts to src/eval/tasks/gpqamain/task_context/:
+writes a single artifact to src/eval/tasks/gpqamain/task_context/:
 
-  test_decontam.jsonl   — JSONL consumed by dataset_audit.py:
-                          {"id": str, "sha256": str, "first_50": str,
+  test_decontam.jsonl   — JSONL consumed by dataset_audit.py, one record
+                          per question:
+                          {"id": str, "sha256": str,
                            "shingle_hashes": [str, ...]}
-  test_hashes.txt       — human-readable summary:
-                          <sha256>\\t<shingle_count>\\t<first_50>
+
+PR #5 intentionally trimmed the shipped artifact to hash-only form (no
+clear-text question text, no duplicate human-readable summary). This
+generator now matches that shape — do not reintroduce `first_50` or a
+`test_hashes.txt` sidecar without coordinating with the audit contract.
 
 Run once. Re-run when the dataset version bumps.
 
@@ -93,7 +97,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--out-dir",
         default="src/eval/tasks/gpqamain/task_context",
-        help="Directory to write test_decontam.jsonl and test_hashes.txt.",
+        help="Directory to write test_decontam.jsonl.",
     )
     p.add_argument("--dataset", default="Idavidrein/gpqa")
     p.add_argument("--config", default="gpqa_main")
@@ -119,12 +123,13 @@ def main() -> int:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     decontam_path = out_dir / "test_decontam.jsonl"
-    summary_path = out_dir / "test_hashes.txt"
 
+    # PR #5 explicitly dropped `first_50` and the human-readable
+    # `test_hashes.txt` summary from the shipped artifact so the task
+    # context never carries clear-text eval questions. Keep the output
+    # strictly to {id, sha256, shingle_hashes}.
     n = 0
-    with decontam_path.open("w") as fdec, summary_path.open("w") as fsum:
-        fsum.write(f"# {args.dataset}::{args.config}::{args.split}@{args.revision}\n")
-        fsum.write("# format: <sha256>\\t<shingle_count>\\t<first_50_chars>\n")
+    with decontam_path.open("w") as fdec:
         for rec in ds:
             q = str(rec["Question"])
             rec_id = str(rec.get("Record ID", f"row_{n}"))
@@ -132,21 +137,17 @@ def main() -> int:
             sha = sha256_hex(norm)
             shingles = shingle_set(norm)
             sh_hashes = sorted({shingle_hash(s) for s in shingles})
-            first_50 = q[:50].replace("\t", " ").replace("\n", " ")
             json.dump(
                 {
                     "id": rec_id,
                     "sha256": sha,
-                    "first_50": first_50,
                     "shingle_hashes": sh_hashes,
                 },
                 fdec,
             )
             fdec.write("\n")
-            fsum.write(f"{sha}\t{len(sh_hashes)}\t{first_50}\n")
             n += 1
     print(f"wrote {n} test items → {decontam_path}")
-    print(f"wrote summary → {summary_path}")
     return 0
 
 

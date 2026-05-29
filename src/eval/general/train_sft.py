@@ -94,6 +94,47 @@ def load_and_validate(path: Path) -> list[dict]:
     return rows
 
 
+def _require_matching_audit(data_path: Path) -> None:
+    """Refuse to train if the sibling audit report is missing, failing, or stale.
+
+    Looks for `dataset_audit_report.json` next to `data_path`. Requires:
+      * report exists
+      * report.pass is True
+      * report.data_sha256 matches sha256(data_path)
+    This prevents an agent from skipping the audit step or from editing
+    data.jsonl after a passing audit was produced.
+    """
+    audit_path = data_path.with_name("dataset_audit_report.json")
+    if not audit_path.is_file():
+        raise SystemExit(
+            f"refusing to train: no audit report at {audit_path}. "
+            "Run dataset_audit.py first."
+        )
+    try:
+        audit = json.loads(audit_path.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        raise SystemExit(f"refusing to train: cannot read {audit_path}: {e}")
+    if not audit.get("pass", False):
+        raise SystemExit(
+            f"refusing to train: audit at {audit_path} did not pass. "
+            "Fix the dataset and re-run dataset_audit.py."
+        )
+    audit_sha = audit.get("data_sha256", "")
+    actual_sha = file_sha256(data_path)
+    if not audit_sha:
+        raise SystemExit(
+            f"refusing to train: audit at {audit_path} is missing "
+            "data_sha256. Re-run dataset_audit.py to produce a current report."
+        )
+    if audit_sha != actual_sha:
+        raise SystemExit(
+            f"refusing to train: audit report data_sha256={audit_sha!r} "
+            f"does not match current {data_path.name} sha256={actual_sha!r}. "
+            "The dataset has changed since it was audited; re-run "
+            "dataset_audit.py."
+        )
+
+
 def main() -> int:
     args = parse_args()
     base_model = os.environ.get("MODEL_TO_TRAIN")
@@ -104,6 +145,8 @@ def main() -> int:
     data_path = Path(args.data_path).resolve()
     if not data_path.is_file():
         raise SystemExit(f"data file not found: {data_path}")
+
+    _require_matching_audit(data_path)
 
     rows = load_and_validate(data_path)
     ds = Dataset.from_list(rows)

@@ -487,8 +487,30 @@ def main() -> int:
         audit_pass = bool(audit.get("pass", False))
         decontam_pass = bool(decontam.get("pass", False))
 
-    strategy_short = extract_strategy(notes, sections)
-    notes_excerpt = re.sub(r"\s+", " ", notes).strip()[:200]
+        # Bind the audit report to the exact dataset bytes. A stale
+        # passing report from an earlier version of data.jsonl must not
+        # let a modified (potentially contaminated) dataset through.
+        audit_sha = audit.get("data_sha256", "")
+        if not audit_sha:
+            raise SystemExit(
+                f"audit report at {audit_path} is missing 'data_sha256'. "
+                "Re-run dataset_audit.py to produce a current report."
+            )
+        if audit_sha != data_sha:
+            raise SystemExit(
+                f"audit report data_sha256={audit_sha!r} does not match "
+                f"current {data_path.name} sha256={data_sha!r}. The dataset "
+                "has changed since it was audited; re-run dataset_audit.py."
+            )
+
+    # All four free-text fields written to the shared CSV are scrubbed the
+    # same way — strategy_short and notes_excerpt would otherwise let eval
+    # scores or comparative score language leak through. extract_strategy
+    # returns the raw first line of ## Hypothesis (or the notes body), so
+    # we route it through short_field() (which scrub_numeric()s + truncates)
+    # rather than emitting it raw.
+    strategy_short = short_field(extract_strategy(notes, sections), 200)
+    notes_excerpt = short_field(notes, 200)
     hypothesis_short = short_field(sections.get("Hypothesis", ""), 200)
     conclusion_short = short_field(sections.get("Conclusion", ""), 200)
 

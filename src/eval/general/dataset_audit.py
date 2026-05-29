@@ -63,6 +63,15 @@ def sha256_hex(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
+def file_sha256(path: Path) -> str:
+    """Stream-hash a file. Matches train_sft.file_sha256 / publish_experiment.file_sha256."""
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 16), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 # --- Loading -----------------------------------------------------------------
 
 def load_rows(path: Path) -> list[dict]:
@@ -283,11 +292,18 @@ def main() -> int:
         print(f"ERROR: test_decontam file not found: {test_path}", file=sys.stderr)
         return 2
 
+    # Bind the report to the exact dataset bytes — publish_experiment.py and
+    # train_sft.py refuse to consume an audit report whose data_sha256 does
+    # not match the current data.jsonl, preventing reuse of a stale passing
+    # report after data.jsonl has changed.
+    data_sha = file_sha256(data_path)
+
     rows = load_rows(data_path)
     if len(rows) < MIN_ROWS:
         report = {
             "pass": False,
             "data_path": str(data_path),
+            "data_sha256": data_sha,
             "row_count": len(rows),
             "reason": f"too few rows ({len(rows)} < {MIN_ROWS})",
         }
@@ -303,6 +319,7 @@ def main() -> int:
     report = {
         "pass": passed,
         "data_path": str(data_path),
+        "data_sha256": data_sha,
         "row_count": len(rows),
         "decontam": decontam,
         "diversity": diversity,

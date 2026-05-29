@@ -32,12 +32,26 @@ EVAL_DIR=$(realpath "$EVAL_DIR")
 TASK_GUESS=$(basename "$EVAL_DIR" | sed 's/_[^_]*$//' | awk -F'_' '{print $1}')
 EVALUATION_TASK="${EVALUATION_TASK:-${TASK_GUESS:-gpqamain}}"
 
+# Resolve REPO_ROOT from the script's location so this works regardless of
+# the submitter's CWD. The script lives at <repo>/scripts/eval_only.sh.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+echo "[eval_only] REPO_ROOT=$REPO_ROOT"
 echo "[eval_only] EVAL_DIR=$EVAL_DIR"
 echo "[eval_only] EVALUATION_TASK=$EVALUATION_TASK"
 echo "[eval_only] model size: $(du -sh "$EVAL_DIR/final_model/model.safetensors" 2>/dev/null | cut -f1)"
 
-REPO_ROOT="$(pwd)"
 TMP_HF_CACHE="/tmp/hf_cache_$$"
+
+# If EVAL_DIR is already inside REPO_ROOT, the repo bind covers it. Otherwise
+# we need an explicit bind so --model-path / --json-output-file are visible
+# inside the container.
+extra_binds=()
+case "$EVAL_DIR" in
+    "$REPO_ROOT"/*) ;;  # already covered by repo bind
+    *) extra_binds+=( --bind "${EVAL_DIR}:${EVAL_DIR}" );;
+esac
 
 apptainer exec \
     --nv \
@@ -52,6 +66,7 @@ apptainer exec \
     --bind "${REPO_ROOT}:${REPO_ROOT}" \
     --bind "${HF_HOME}:${TMP_HF_CACHE}" \
     --bind "${POSTTRAIN_ENV_DIR}:/opt/env" \
+    "${extra_binds[@]}" \
     --pwd "${REPO_ROOT}/src/eval/tasks/${EVALUATION_TASK}" \
     "${POST_TRAIN_BENCH_CONTAINERS_DIR}/vllm_debug.sif" \
     python evaluate.py \

@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 
@@ -26,8 +27,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--results-dir", default=os.environ.get("POST_TRAIN_BENCH_RESULTS_DIR", "results"))
     p.add_argument(
         "--metric-key",
-        default=None,
-        help="Specific key inside metrics.json to rank by. Default: first numeric value found.",
+        required=True,
+        help=(
+            "Required. Key inside metrics.json to rank by, e.g. "
+            "'accuracy' for gpqamain. There is no default — picking the "
+            "'first numeric field' is too easy to misuse for a winner writer."
+        ),
     )
     p.add_argument("--shared-log-dir", default=None)
     return p.parse_args()
@@ -37,22 +42,19 @@ def safe(s: str) -> str:
     return re.sub(r"[/:\[\]]", "_", s)
 
 
-def load_metric(metrics_path: Path, key: str | None) -> tuple[str, float] | None:
+def load_metric(metrics_path: Path, key: str) -> tuple[str, float] | None:
+    """Return (key, float_value) if metrics.json has `key` as a numeric value,
+    else None. No 'first numeric field' fallback by design."""
     try:
         m = json.loads(metrics_path.read_text())
     except (FileNotFoundError, json.JSONDecodeError):
         return None
-    if key and key in m:
-        try:
-            return key, float(m[key])
-        except (TypeError, ValueError):
-            return None
-    for k, v in m.items():
-        try:
-            return k, float(v)
-        except (TypeError, ValueError):
-            continue
-    return None
+    if key not in m:
+        return None
+    try:
+        return key, float(m[key])
+    except (TypeError, ValueError):
+        return None
 
 
 def main() -> int:
@@ -79,14 +81,39 @@ def main() -> int:
             entries.append(entry)
 
     if not entries:
-        print(f"no runs found under {results_root} matching {pattern}")
+        print(f"no runs found under {results_root} matching {pattern}", file=sys.stderr)
         return 1
 
-    entries.sort(
-        key=lambda e: (e["metric_value"] if e["metric_value"] is not None else float("-inf")),
-        reverse=True,
-    )
-    winner = entries[0]
+    # Surface which runs are missing the metric, then exclude them from
+    # ranking. If *all* runs are missing it, fail loudly — we will not
+    # write a winner.json against an empty ranking.
+    missing = [e for e in entries if e["metric_value"] is None]
+    valid = [e for e in entries if e["metric_value"] is not None]
+
+    if missing:
+        print(
+            f"warning: {len(missing)}/{len(entries)} runs have no '{args.metric_key}' "
+            "in metrics.json — excluding them from ranking:",
+            file=sys.stderr,
+        )
+        for e in missing:
+            reason = "metrics.json missing" if not e["metrics_path_exists"] else f"no '{args.metric_key}' field"
+            print(f"  - {e['agent_dir']}/{Path(e['eval_dir']).name}: {reason}", file=sys.stderr)
+
+    if not valid:
+        print(
+            f"error: no runs have a parsed '{args.metric_key}' metric; "
+            "refusing to write winner.json. Check that eval phase completed "
+            "and that --metric-key matches a numeric key produced by evaluate.py.",
+            file=sys.stderr,
+        )
+        return 2
+
+    valid.sort(key=lambda e: e["metric_value"], reverse=True)
+    winner = valid[0]
+    # Keep the full ranking (valid first, then missing) so the artifact still
+    # records every run that was considered.
+    full_ranking = valid + missing
 
     if args.shared_log_dir:
         shared_dir = Path(args.shared_log_dir)
@@ -97,18 +124,17 @@ def main() -> int:
     payload = {
         "task": args.task,
         "model": args.model,
+        "metric_key": args.metric_key,
         "winner": winner,
-        "ranking": entries,
+        "ranking": full_ranking,
+        "excluded_missing_metric": [e["eval_dir"] for e in missing],
     }
     winner_path.write_text(json.dumps(payload, indent=2))
     print(f"wrote {winner_path}")
-    if winner["metric_value"] is None:
-        print("WARNING: winner has no parsed metric; check that runs completed.")
-    else:
-        print(
-            f"winner: {winner['agent_dir']}/{Path(winner['eval_dir']).name} "
-            f"with {winner['metric_key']}={winner['metric_value']:.4f}"
-        )
+    print(
+        f"winner: {winner['agent_dir']}/{Path(winner['eval_dir']).name} "
+        f"with {winner['metric_key']}={winner['metric_value']:.4f}"
+    )
     return 0
 
 

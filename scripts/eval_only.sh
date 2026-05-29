@@ -18,8 +18,15 @@
 #SBATCH --error=logs/eval_only_%j.err
 
 set -eo pipefail
+
+# Resolve REPO_ROOT from the script's location FIRST, so the source line below
+# (and everything after) works regardless of the submitter's CWD. The script
+# lives at <repo>/scripts/eval_only.sh.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 export POST_TRAIN_BENCH_JOB_SCHEDULER="${POST_TRAIN_BENCH_JOB_SCHEDULER:-slurm}"
-source src/commit_utils/set_env_vars.sh
+source "${REPO_ROOT}/src/commit_utils/set_env_vars.sh"
 set -u
 
 EVAL_DIR="${1:-}"
@@ -32,10 +39,17 @@ EVAL_DIR=$(realpath "$EVAL_DIR")
 TASK_GUESS=$(basename "$EVAL_DIR" | sed 's/_[^_]*$//' | awk -F'_' '{print $1}')
 EVALUATION_TASK="${EVALUATION_TASK:-${TASK_GUESS:-gpqamain}}"
 
-# Resolve REPO_ROOT from the script's location so this works regardless of
-# the submitter's CWD. The script lives at <repo>/scripts/eval_only.sh.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# eval_only.sh exists specifically to run the evaluator, which needs the
+# python deps shipped in POSTTRAIN_ENV_DIR. Fail loudly if it's missing
+# rather than silently binding an empty path over /opt/env (which would
+# leave PATH/PYTHONPATH pointing at a non-existent env inside the container).
+if [ -z "${POSTTRAIN_ENV_DIR:-}" ] || [ ! -d "${POSTTRAIN_ENV_DIR}" ]; then
+    echo "[eval_only] ERROR: POSTTRAIN_ENV_DIR is not set to an existing directory." >&2
+    echo "[eval_only]   The evaluator needs python deps bound at /opt/env." >&2
+    echo "[eval_only]   Export POSTTRAIN_ENV_DIR=<path-to-env> in your shell," >&2
+    echo "[eval_only]   or set it in src/commit_utils/set_env_vars.sh." >&2
+    exit 3
+fi
 
 echo "[eval_only] REPO_ROOT=$REPO_ROOT"
 echo "[eval_only] EVAL_DIR=$EVAL_DIR"

@@ -96,9 +96,16 @@ cp src/utils/system_monitor.sh "${JOB_DIR}/system_monitor.sh"
 cp src/utils/timestamp_lines.py "${JOB_DIR}/timestamp_lines.py"
 cp "agents/${AGENT}/solve.sh" "${JOB_DIR}/agent_solve.sh"
 
-# Copy agent-specific auth if present (e.g. for non-API agents)
+# Copy agent-specific auth if present (e.g. for non-API agents).
+# For codex variants that piggy-back on the ChatGPT auth flow
+# (codex_fast etc.), fall back to agents/codex_non_api/auth.json — that's
+# the file the documented `codex login` setup actually produces, so
+# users don't have to duplicate credentials per variant.
 if [ -f "agents/${AGENT}/auth.json" ]; then
     cp "agents/${AGENT}/auth.json" "${JOB_DIR}/.codex/auth.json"
+elif [[ "${AGENT}" == codex_* ]] && [ -f "agents/codex_non_api/auth.json" ]; then
+    echo "Note: agents/${AGENT}/auth.json not found; falling back to agents/codex_non_api/auth.json"
+    cp "agents/codex_non_api/auth.json" "${JOB_DIR}/.codex/auth.json"
 fi
 if [ -f "agents/${AGENT}/oauth_token" ]; then
     cp "agents/${AGENT}/oauth_token" "${JOB_DIR}/oauth_token"

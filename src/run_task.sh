@@ -50,12 +50,16 @@ if [ -d "src/eval/tasks/${EVALUATION_TASK}/evaluation_code" ]; then
 fi
 cp -r src/eval/templates "${JOB_DIR}/task/"
 
-# Data-engineering scripts: locked training recipe, decontam+diversity audit,
-# experiment-row publisher. The agent may invoke these but may not modify them.
-cp src/eval/general/train_sft.py "${JOB_DIR}/task/"
-cp src/eval/general/dataset_audit.py "${JOB_DIR}/task/"
-cp src/eval/general/publish_experiment.py "${JOB_DIR}/task/"
-mkdir -p "${JOB_DIR}/task/experiments"
+if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ]; then
+    # Data-engineering scripts: locked training recipe, decontam+diversity
+    # audit, experiment-row publisher. The agent may invoke these but may
+    # not modify them. Only copied when this run is in data-eng mode so we
+    # don't pollute the standard default-prompt workspace.
+    cp src/eval/general/train_sft.py "${JOB_DIR}/task/"
+    cp src/eval/general/dataset_audit.py "${JOB_DIR}/task/"
+    cp src/eval/general/publish_experiment.py "${JOB_DIR}/task/"
+    mkdir -p "${JOB_DIR}/task/experiments"
+fi
 
 if [ -d "src/eval/tasks/${EVALUATION_TASK}/task_context" ]; then
     cp -r src/eval/tasks/${EVALUATION_TASK}/task_context/* "${JOB_DIR}/task"
@@ -126,18 +130,66 @@ with_record_the_time() {
 SOLVE_OUT="${EVAL_DIR}/solve_out.txt"
 
 # Shared append-only experiment log for parallel data-engineering agents.
-# All array members for a given (task, model) write to the same CSV on Weka.
-SHARED_LOG_DIR_HOST="${POST_TRAIN_BENCH_RESULTS_DIR}/data_eng_shared/${EVALUATION_TASK}_${RESULT_PREFIX_SAFE}"
-mkdir -p "${SHARED_LOG_DIR_HOST}"
-SHARED_LOG_CSV_CONTAINER="/shared_log/shared_log.csv"
+# Only set up when this run is in data-eng mode — default-prompt runs do
+# not write a shared CSV and do not bind-mount /shared_log.
+if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ]; then
+    SHARED_LOG_DIR_HOST="${POST_TRAIN_BENCH_RESULTS_DIR}/data_eng_shared/${EVALUATION_TASK}_${RESULT_PREFIX_SAFE}"
+    mkdir -p "${SHARED_LOG_DIR_HOST}"
+    SHARED_LOG_CSV_CONTAINER="/shared_log/shared_log.csv"
+fi
+
+# Build the data-engineering-only extra args. These are appended to both the
+# solve_task apptainer exec and the contamination-judge apptainer exec only
+# when POST_TRAIN_BENCH_PROMPT=data_eng_prompt, and only when the source
+# directories actually exist on this host. Default-prompt runs get no extra
+# env/binds and therefore work on machines that don't have these paths.
+# Default PATH for the original (non-data-eng) prompt path. Data-eng runs
+# prepend the bind-mounted /opt/env directories so the agent can use the
+# shared python + CLI install. $PATH below is expanded by THIS shell, not
+# inside the container — matches the original (non-array) form.
+CONTAINER_PATH_DEFAULT="/root/.local/bin:/home/ben/.local/bin:$PATH"
+CONTAINER_PATH_DATA_ENG="/opt/env/local/bin:/opt/env/bin:/opt/env/node/bin:/opt/env/npm-global/bin:/root/.local/bin:/home/ben/.local/bin:$PATH"
+
+SOLVE_EXTRA_ENV=()
+SOLVE_EXTRA_BINDS=()
+JUDGE_EXTRA_ENV=()
+JUDGE_EXTRA_BINDS=()
+if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ]; then
+    CONTAINER_PATH="$CONTAINER_PATH_DATA_ENG"
+    SOLVE_EXTRA_ENV+=(
+        --env "PYTHONPATH=/opt/env/local/lib/python${POSTTRAIN_PYTHON_VERSION}/dist-packages"
+        --env "TEACHER_VLLM_URL=${TEACHER_VLLM_URL:-}"
+        --env "TEACHER_MODEL_NAME=${TEACHER_MODEL_NAME:-}"
+        --env "TEACHER_API_KEY=${TEACHER_API_KEY:-}"
+        --env 'VLLM_DEFAULT_SERVER_ARGS={"enforce_eager": true}'
+        --env "SHARED_LOG_CSV=${SHARED_LOG_CSV_CONTAINER}"
+        --env "AGENT_ID=${AGENT}-${CLUSTER_ID}"
+        --env "CLUSTER_ID=${CLUSTER_ID}"
+        --env "MODEL_TO_TRAIN=${MODEL_TO_TRAIN}"
+    )
+    JUDGE_EXTRA_ENV+=(
+        --env "PYTHONPATH=/opt/env/local/lib/python${POSTTRAIN_PYTHON_VERSION}/dist-packages"
+    )
+    if [ -n "${SHARED_LOG_DIR_HOST:-}" ] && [ -d "${SHARED_LOG_DIR_HOST}" ]; then
+        SOLVE_EXTRA_BINDS+=( --bind "${SHARED_LOG_DIR_HOST}:/shared_log" )
+    fi
+    if [ -n "${POSTTRAIN_ENV_DIR:-}" ] && [ -d "${POSTTRAIN_ENV_DIR}" ]; then
+        SOLVE_EXTRA_BINDS+=( --bind "${POSTTRAIN_ENV_DIR}:/opt/env" )
+        JUDGE_EXTRA_BINDS+=( --bind "${POSTTRAIN_ENV_DIR}:/opt/env" )
+    fi
+    if [ -n "${BASE_MODELS_DIR:-}" ] && [ -d "${BASE_MODELS_DIR}" ]; then
+        SOLVE_EXTRA_BINDS+=( --bind "${BASE_MODELS_DIR}:/base_models" )
+    fi
+else
+    CONTAINER_PATH="$CONTAINER_PATH_DEFAULT"
+fi
 
 solve_task() {
     timeout --signal=TERM --kill-after=30s "$((NUM_HOURS * 60 + 5))m" \
     apptainer exec \
         --nv \
         -c \
-        --env PATH="/opt/env/local/bin:/opt/env/bin:/opt/env/node/bin:/opt/env/npm-global/bin:/root/.local/bin:/home/ben/.local/bin:$PATH" \
-        --env PYTHONPATH="/opt/env/local/lib/python${POSTTRAIN_PYTHON_VERSION}/dist-packages" \
+        --env PATH="$CONTAINER_PATH" \
         --env HF_HOME="${HF_HOME_NEW}" \
         --env ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
         --env CODEX_API_KEY="${CODEX_API_KEY}" \
@@ -150,19 +202,10 @@ solve_task() {
         --env NUM_GPUS="${NUM_GPUS}" \
         --env PROMPT="${PROMPT}" \
         --env AGENT_CONFIG="${AGENT_CONFIG}" \
-        --env TEACHER_VLLM_URL="${TEACHER_VLLM_URL:-}" \
-        --env TEACHER_MODEL_NAME="${TEACHER_MODEL_NAME:-}" \
-        --env TEACHER_API_KEY="${TEACHER_API_KEY:-}" \
-        --env VLLM_DEFAULT_SERVER_ARGS='{"enforce_eager": true}' \
-        --env SHARED_LOG_CSV="${SHARED_LOG_CSV_CONTAINER}" \
-        --env AGENT_ID="${AGENT}-${CLUSTER_ID}" \
-        --env CLUSTER_ID="${CLUSTER_ID}" \
-        --env MODEL_TO_TRAIN="${MODEL_TO_TRAIN}" \
+        "${SOLVE_EXTRA_ENV[@]}" \
         --bind "${JOB_TMP}:/tmp" \
         --bind "${HF_MERGED}:${HF_HOME_NEW}" \
-        --bind "${SHARED_LOG_DIR_HOST}:/shared_log" \
-        --bind "${POSTTRAIN_ENV_DIR}:/opt/env" \
-        --bind "${BASE_MODELS_DIR:-/mnt/weka/home/shaurya.rohatgi/base_models}:/base_models" \
+        "${SOLVE_EXTRA_BINDS[@]}" \
         --home "${JOB_DIR}:/home/ben" \
         --pwd "/home/ben/task" \
         --writable-tmpfs \
@@ -223,15 +266,15 @@ cp -r "containers/other_home_data/.codex" "${JOB_DIR}/"
 with_huggingface_overlay apptainer exec \
     --nv \
     -c \
-    --env PATH="/opt/env/local/bin:/opt/env/bin:/opt/env/node/bin:/opt/env/npm-global/bin:/root/.local/bin:/home/ben/.local/bin:$PATH" \
-    --env PYTHONPATH="/opt/env/local/lib/python${POSTTRAIN_PYTHON_VERSION}/dist-packages" \
+    --env PATH="$CONTAINER_PATH" \
     --env HF_HOME="${HF_HOME_NEW}" \
     --env CODEX_API_KEY="${CODEX_API_KEY}" \
     --env VLLM_API_KEY="inspectai" \
     --env PYTHONNOUSERSITE="1" \
+    "${JUDGE_EXTRA_ENV[@]}" \
     --bind "${JOB_TMP}:/tmp" \
     --bind "${HF_MERGED}:${HF_HOME_NEW}" \
-    --bind "${POSTTRAIN_ENV_DIR}:/opt/env" \
+    "${JUDGE_EXTRA_BINDS[@]}" \
     --home "${JOB_DIR}:/home/ben" \
     --pwd "/home/ben/task" \
     --writable-tmpfs \
@@ -252,7 +295,8 @@ tree ${JOB_DIR}/task
 echo "================================"
 
 if [ -d "${JOB_DIR}/task/final_model" ]; then
-    # -L: dereference symlinks (agent may promote via `ln -sfn experiments/exp_N/final_model final_model`)
+    # The data-eng prompt instructs agents to `cp -r` (not symlink) their
+    # promoted experiment into final_model/, so a plain cp -r here suffices.
     cp -r "${JOB_DIR}/task/final_model" "$EVAL_DIR/final_model"
 fi
 
@@ -263,8 +307,9 @@ fi
 # Belt-and-suspenders: snapshot per-experiment metadata into a dedicated
 # directory *before* delete_hf_models.py and the bulk task/ copy. This way
 # the notes, audit reports, manifests, and the experiment index survive even
-# if downstream cleanup misbehaves.
-if [ -d "${JOB_DIR}/task/experiments" ]; then
+# if downstream cleanup misbehaves. Only applies to data-eng runs (the
+# experiments/ tree does not exist on default-prompt runs).
+if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ] && [ -d "${JOB_DIR}/task/experiments" ]; then
     mkdir -p "$EVAL_DIR/experiment_notes"
     if [ -f "${JOB_DIR}/task/experiments/index.csv" ]; then
         cp "${JOB_DIR}/task/experiments/index.csv" "$EVAL_DIR/experiment_notes/index.csv"
@@ -303,19 +348,38 @@ run_evaluation() {
     local eval_num="$2"
     nvidia-smi --query-compute-apps=pid --format=csv,noheader | xargs -r kill -9
     sleep 5
+    # The data-eng-specific /opt/env bind, PATH/PYTHONPATH additions, and
+    # VLLM_DEFAULT_SERVER_ARGS only fire when this run is in data-eng mode
+    # AND POSTTRAIN_ENV_DIR points at a real directory on this host.
+    # Default-prompt runs use the image's own python and pristine PATH so
+    # the eval works on machines without a /opt/env provision.
+    # Re-checked here because this function is re-evaluated via
+    # `bash -c "$(declare -f ...); ..."` in a subshell that does NOT inherit
+    # the outer non-exported arrays.
+    local extra_env=()
+    local extra_bind=()
+    local eval_path="\$PATH"
+    if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ] && \
+       [ -n "${POSTTRAIN_ENV_DIR:-}" ] && [ -d "${POSTTRAIN_ENV_DIR}" ]; then
+        eval_path="/opt/env/local/bin:/opt/env/bin:/opt/env/node/bin:/opt/env/npm-global/bin:\$PATH"
+        extra_env=(
+            --env "PYTHONPATH=/opt/env/local/lib/python${POSTTRAIN_PYTHON_VERSION}/dist-packages"
+            --env 'VLLM_DEFAULT_SERVER_ARGS={"enforce_eager": true}'
+        )
+        extra_bind=( --bind "${POSTTRAIN_ENV_DIR}:/opt/env" )
+    fi
     with_huggingface_overlay apptainer exec \
         --nv \
-        --env PATH="/opt/env/local/bin:/opt/env/bin:/opt/env/node/bin:/opt/env/npm-global/bin:$PATH" \
-        --env PYTHONPATH="/opt/env/local/lib/python${POSTTRAIN_PYTHON_VERSION}/dist-packages" \
+        --env PATH="$(eval echo "$eval_path")" \
         --env "HF_HOME=${TMP_HF_CACHE}" \
         --env OPENAI_API_KEY="${OPENAI_API_KEY}" \
         --env VLLM_API_KEY="inspectai" \
-        --env VLLM_DEFAULT_SERVER_ARGS='{"enforce_eager": true}' \
         --env PYTHONNOUSERSITE="1" \
+        "${extra_env[@]}" \
         --writable-tmpfs \
         --bind "${REPO_ROOT}:${REPO_ROOT}" \
         --bind "${HF_MERGED}:${TMP_HF_CACHE}" \
-        --bind "${POSTTRAIN_ENV_DIR}:/opt/env" \
+        "${extra_bind[@]}" \
         --pwd "$(pwd)/src/eval/tasks/${EVALUATION_TASK}" \
         ${POST_TRAIN_BENCH_CONTAINERS_DIR}/vllm_debug.sif python "evaluate.py" \
             --model-path "$EVAL_DIR/final_model" \

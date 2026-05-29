@@ -27,6 +27,16 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 export POST_TRAIN_BENCH_JOB_SCHEDULER="${POST_TRAIN_BENCH_JOB_SCHEDULER:-slurm}"
 source "${REPO_ROOT}/src/commit_utils/set_env_vars.sh"
+
+# Normalize POST_TRAIN_BENCH_CONTAINERS_DIR to an absolute path so this
+# script works when submitted from outside the repo. The default in
+# set_env_vars.sh is the relative "containers".
+case "${POST_TRAIN_BENCH_CONTAINERS_DIR}" in
+    /*) ;;  # already absolute, leave alone
+    *)  POST_TRAIN_BENCH_CONTAINERS_DIR="${REPO_ROOT}/${POST_TRAIN_BENCH_CONTAINERS_DIR}" ;;
+esac
+export POST_TRAIN_BENCH_CONTAINERS_DIR
+
 set -u
 
 EVAL_DIR="${1:-}"

@@ -8,14 +8,20 @@ Your only variable is the dataset you construct.
 - A locked SFT+LoRA script (\`train_sft.py\`) consumes your dataset and produces \`final_model/\`.
 
 ## Objective
-Construct one or more training datasets, audit each, and train with the locked recipe.
-Store your best model in the folder \`final_model\` (copy — not symlink — the chosen experiment's \`final_model/\` into place; see step 7).
-Treat the run as a chain of falsifiable experiments — each iteration must build on a named predecessor.
+Construct one or more training datasets, audit each, train with the locked recipe,
+and self-evaluate each candidate. Store your best model in the folder \`final_model\`
+(copy — not symlink — the chosen experiment's \`final_model/\` into place; see step 10).
+
+Treat the run as a chain of falsifiable experiments — each iteration must build on a
+named predecessor. You are required to run at least 10 experiments; the publisher
+will refuse to accept "done" before exp_010.
 
 ## What you can read
 - \`benchmark_overview.md\` — what the benchmark is and what good training data looks like.
 - \`evaluate.py\` — read-only. The benchmark scorer.
-- \`$SHARED_LOG_CSV\` — peer agents' experiment rows (strategy + audit metrics + hypothesis/conclusion). Re-read at every iteration.
+- \`$SHARED_LOG_CSV\` — peer agents' experiment rows (strategy + audit metrics + hypothesis/findings/outcome). Re-read at every iteration. Peers' rows are numeric-scrubbed in shared fields, so other agents' raw eval numbers are not visible to you.
+- \`experiments/KNOWLEDGE.md\` — your accumulating, tagged learning log. Read it at the start of EVERY experiment. Append 1-3 lines at the end of EVERY experiment.
+- \`experiments/exp_<K>/eval_result.json\` — YOUR OWN per-experiment self-eval output. These contain raw accuracy numbers — that is intentional in V2: you must ground your improved/no judgment in the actual score delta vs parent.
 - \`/shared_log/promoted/<dataset_sha256>.jsonl\` — data files from prior promoted experiments. You MAY fork these. No other \`/shared_log/\` content is readable.
 - Anything you can fetch from the internet or Hugging Face Hub.
 
@@ -23,8 +29,8 @@ Treat the run as a chain of falsifiable experiments — each iteration must buil
 - \`bash timer.sh\` — remaining time (hh:mm).
 - \`python dataset_audit.py --data-path <jsonl>\` — **mandatory** hard gate. Fails on test-set contamination or low diversity.
 - \`python train_sft.py --data-path <jsonl> --output-dir experiments/exp_<N>/final_model\` — locked recipe. Whitelisted args only: \`--data-path\`, \`--output-dir\`, \`--max-steps\`, \`--seed\`. (\`$MODEL_TO_TRAIN\` is fixed; no \`--base-model\` flag.)
-- \`python publish_experiment.py --exp-dir experiments/exp_<N>/ [--data-sources "..."] [--promoted | --audit-failed]\` — appends one row to \`$SHARED_LOG_CSV\` and to \`experiments/index.csv\`.
-- \`python evaluate.py --model-path <path> --limit 5 --max-tokens 512\` — small qualitative probe. **Do not use this to optimize against the test set.** Delete the resulting metrics file before publishing so it never enters the archive.
+- \`python publish_experiment.py --exp-dir experiments/exp_<N>/ [--data-sources "..."] [--promoted | --audit-failed] [--done]\` — appends one row to \`$SHARED_LOG_CSV\` and to \`experiments/index.csv\`. \`--done\` is only honored after exp_010 and after a 10-experiment plateau (publisher enforces).
+- \`python evaluate.py --model-path <path> --limit -1 --json-output-file <path> --max-tokens 128 --max-connections 8 --gpu-memory-utilization 0.8\` — full self-eval. You are EXPECTED to run this on every experiment (see step 7).
 
 ## Teacher vLLM endpoint (for synthetic data)
 An OpenAI-compatible endpoint is available:
@@ -42,58 +48,140 @@ resp = client.chat.completions.create(
 )
 \`\`\`
 
-## Workflow per iteration (researcher cycle)
+## Workflow per iteration (V2 researcher cycle)
 
 For each experiment exp_<N>:
 
-1. **READ PRIOR.** \`tail -n 50 $SHARED_LOG_CSV\`. Also read your own \`experiments/exp_<K>/notes.md\` for each K < N. Identify your candidate parent: typically the most recently published row with \`audit_pass=True\` and a positive \`conclusion_short\`. CHECK how many peers already cite that parent_exp_id; prefer parents with fewer existing children to keep parallel exploration broad. If a \`promoted=True\` row exists from a prior run, you may fork its actual data — it lives at \`/shared_log/promoted/<dataset_sha256>.jsonl\`. Parent ids in \`$SHARED_LOG_CSV\` come in pairs \`(agent_id, exp_id)\` — bare \`exp_NNN\` is ambiguous across agents, so when you reference a peer's row use the qualified form \`<agent_id>/<exp_id>\` (see step 3).
+**Step 0. READ ACCUMULATED KNOWLEDGE.**
+\`\`\`bash
+cat experiments/KNOWLEDGE.md        # tagged learnings from your prior experiments
+                                    # (may be empty on exp_001 — that's fine)
+tail -n 50 $SHARED_LOG_CSV          # peers' published rows
+\`\`\`
+Pick the next direction grounded in what you've already learned, not vibes.
 
-2. **FORMULATE HYPOTHESIS.** A 1–3 sentence falsifiable claim that changes ONE variable from your parent. State the predicted observable. Good examples:
-   - "If we strip the Inspect MCQ template prefix from user prompts, distinct_1g will clear the gate at row_count >= 1200 because the prefix dominated the unigram counts."
-   - "If assistant turns end with <|endoftext|>, the trained model will halt after the ANSWER letter (probe generates <50 tokens, not 512)."
-   Vague claims ("the model will perform better", "results should improve") are rejected by review.
+**Step 1. CHOOSE PARENT (mandatory rule).**
+Run:
+\`\`\`bash
+python3 -c "
+import csv, os
+rows = list(csv.DictReader(open('experiments/index.csv'))) if os.path.exists('experiments/index.csv') else []
+improved = [r for r in rows if r.get('outcome_improved') == 'yes']
+print(improved[-1]['exp_id'] if improved else 'none')"
+\`\`\`
+This is your \`parent_exp_id\`. For exp_001 it's \`none\`. The backtrack rule is automatic:
+if exp_007's hypothesis was disproven, the publisher requires the parent to be the
+most-recent confirmed-improved exp (e.g., exp_004), NOT exp_007. Cross-agent forks
+use the qualified \`<agent_id>/exp_id\` form. If you want to deliberately fork from a
+non-most-recent-improved parent (e.g., to escape a local optimum), you MAY do so but
+you MUST include the marker \`[override:<reason>]\` in your \`## Method\` section —
+otherwise the publisher refuses.
 
-3. **WRITE NOTES.md.** Open \`experiments/exp_<N>/notes.md\` and fill in the required sections:
-   \`\`\`
-   # exp_<N>
+**Step 2. FORMULATE HYPOTHESIS.** ONE variable change vs parent. Falsifiable.
+Read the parent's \`eval_result.json\` so you know the actual starting score
+(\`eval_before\` in your Outcome).
 
-   ## Parent
-   exp_<K>           # bare form: your OWN prior experiment (must exist in experiments/index.csv)
-                     # OR <agent_id>/exp_<K>: a peer's experiment from $SHARED_LOG_CSV (REQUIRED form for cross-agent forks — bare exp_K from a peer is rejected because every agent independently has its own exp_001, exp_002, ...)
-                     # OR "none" only for exp_001, OR if you're pivoting (then also fill ## PivotReason)
+**Step 3. PLAN METHOD.** Write the notes.md scaffold:
+\`\`\`
+# exp_<N>
+## Parent
+<id>           # bare exp_K (own) or <agent_id>/exp_K (peer) or "none" (exp_001 only)
+## Hypothesis
+<one falsifiable claim, ONE delta vs parent>
+## Method
+- <delta 1>
+- <delta 2 if any>
+- [override:<reason>]  # ONLY if forking from a non-most-recent-improved parent
+## Findings
+<FILL AFTER step 7. 2-4 sentences about what surprised you — NOT just
+ "hypothesis held". The unplanned learning is what's valuable to peers.>
+## Outcome
+<FILL AFTER step 7. Structured exactly as shown in step 8.>
+\`\`\`
 
-   ## Hypothesis
-   <your hypothesis from step 2>
+**Step 4. SCAFFOLD FROM PARENT.** If parent != none, copy parent's dataset and
+build script:
+\`\`\`bash
+cp experiments/<parent>/data.jsonl experiments/exp_<N>/data.jsonl
+cp experiments/<parent>/build_dataset.py experiments/exp_<N>/build_dataset.py
+\`\`\`
+Then edit \`build_dataset.py\` per your hypothesis and re-generate \`data.jsonl\`.
+(For cross-agent parents whose files you cannot see, build from scratch and cite
+the peer parent in \`## Parent\`.)
 
-   ## Method
-   - <delta 1 from parent: what data source / format / preprocessing changed>
-   - <delta 2 if any>
+**Step 5. AUDIT — mandatory.**
+\`\`\`bash
+python dataset_audit.py --data-path experiments/exp_<N>/data.jsonl
+\`\`\`
+If audit fails, either fix and re-audit, or \`publish_experiment.py --audit-failed\`
+to record the disproven hypothesis and move on.
 
-   ## Conclusion
-   <FILLED IN AFTER step 6. Qualitative only. No numeric scores — the publisher strips digits, percentages, and comparative phrases like "better than" from this field.>
+**Step 6. TRAIN — locked recipe.**
+\`\`\`bash
+python train_sft.py --data-path experiments/exp_<N>/data.jsonl \\
+    --output-dir experiments/exp_<N>/final_model
+\`\`\`
 
-   ## PivotReason
-   <OPTIONAL. Required only when Parent=none on exp_002+. Explain why no prior experiment was a valid base.>
-   \`\`\`
+**Step 7. EVAL YOURSELF (new in V2).**
+\`\`\`bash
+python evaluate.py --model-path experiments/exp_<N>/final_model \\
+    --limit -1 --json-output-file experiments/exp_<N>/eval_result.json \\
+    --max-tokens 128 --max-connections 8 --gpu-memory-utilization 0.8
+\`\`\`
+Parse the accuracy out of \`eval_result.json\` (e.g.,
+\`python3 -c "import json; d=json.load(open('experiments/exp_<N>/eval_result.json')); print(d.get('accuracy'))"\`
+— check the structure first). Compare to your parent's \`eval_result.json\`.
 
-4. **EXECUTE.** Mine HF (\`huggingface_hub.HfApi().list_datasets(search=...)\`, \`datasets.load_dataset(...)\`) → (optional) synthesize via \`$TEACHER_VLLM_URL\` with diverse prompts → format as messages-jsonl (\`{"messages": [{"role": "user", ...}, {"role": "assistant", ...}]}\`, optional leading system message) → **AUDIT** (mandatory: \`python dataset_audit.py --data-path experiments/exp_<N>/data.jsonl\`). If audit fails, either fix and retry OR \`publish_experiment.py --audit-failed\` to record the disproven hypothesis and move on.
+**Step 8. WRITE FINDINGS + OUTCOME.**
+- \`## Findings\`: 2-4 sentences about what surprised you, NOT just "hypothesis
+  held". The unplanned learning is what's valuable to peers.
+- \`## Outcome\` (structured EXACTLY like this — the publisher regex-parses):
+  \`\`\`
+  eval_before: <parent's accuracy as float, or "none" for exp_001>
+  eval_after: <this exp's accuracy as float>
+  improved: yes | no | marginal
+  confidence: high | med | low
+  \`\`\`
+  \`marginal\` means within ±0.005 of parent (i.e., noise). Anything strictly
+  outside that band is \`yes\` (improved) or \`no\` (regression).
 
-5. **TRAIN.** \`python train_sft.py --data-path experiments/exp_<N>/data.jsonl --output-dir experiments/exp_<N>/final_model\`.
+**Step 9. APPEND TO KNOWLEDGE.md.** Add 1-3 lines. Strict format (publisher checks):
+\`\`\`
+[YYYY-MM-DDTHH:MMZ] [exp_<NNN>] [#tag] one-sentence learning
+\`\`\`
+Tag whitelist: \`#data\`, \`#filter\`, \`#format\`, \`#training\`, \`#audit\`, \`#dead-end\`, \`#meta\`.
+Be specific. Examples:
+- Bad: \`[#filter] filtering helped\`
+- Good: \`[#filter] removing history/law subjects from MMLU bumped accuracy 0.31→0.33 — non-STEM carryover was suppressing GPQA signal\`
 
-6. **PROBE & WRITE CONCLUSION.** Two-tier probe:
-   - **Format probe (n=5, ~30s):** \`python evaluate.py --model-path experiments/exp_<N>/final_model --limit 5 --max-tokens 512 --json-output-file /tmp/format_probe.json\`. Read the inspect_ai log to inspect generation length and whether it stops cleanly after \`ANSWER: X\`.
-   - **Quality probe (n=30, ~3 min):** ONLY if format probe shows clean stopping. \`python evaluate.py --model-path experiments/exp_<N>/final_model --limit 30 --max-tokens 1500 --json-output-file /tmp/quality_probe.json\`. Read the inspect_ai per-sample completions to see if the model is reasoning or guessing. n=30 is the smallest sample that lets you observe behavioral differences reliably; n=5 is essentially noise.
-   Update \`## Conclusion\` in notes.md based on what you observed. **Do not write numeric scores** — describe behavior. Delete both probe files (\`rm -f /tmp/format_probe.json /tmp/quality_probe.json\`) and any inspect_ai logs they produced so they don't leak into the archive.
+**Step 10. PUBLISH.**
+\`\`\`bash
+python publish_experiment.py --exp-dir experiments/exp_<N>/ \\
+    [--data-sources "<hf_id1>,<hf_id2>,synthetic"] \\
+    [--promoted | --audit-failed]
+\`\`\`
+If \`outcome.improved == yes\` and you want this to be the new candidate parent for
+future experiments, also pass \`--promoted\`. \`--promoted\` is downgraded to False
+unless audit_pass AND decontam_pass AND outcome_improved == "yes".
 
-7. **PUBLISH.** \`python publish_experiment.py --exp-dir experiments/exp_<N>/ [--data-sources "<hf_id1>,<hf_id2>,synthetic"] [--promoted | --audit-failed]\`. Promoted means you've copied this exp's final_model as the run's final_model: \`rm -rf final_model && cp -r experiments/exp_<N>/final_model final_model\`. (Do NOT use \`ln -sfn\` — the wrapper expects \`final_model/\` to be a real directory.)
+If promoted, also copy this exp's final_model as the run's final_model:
+\`rm -rf final_model && cp -r experiments/exp_<N>/final_model final_model\`.
+(Do NOT use \`ln -sfn\` — the wrapper expects \`final_model/\` to be a real directory.)
 
-Then NEXT iteration: exp_<N+1>'s parent is usually exp_<N> unless your conclusion makes you want to pivot to a different ancestor.
+## Iteration termination
+- You may NOT call \`publish_experiment.py --done\` until exp_010.
+- After exp_010, you may pass \`--done\` ONLY IF the last 10 published experiments
+  had \`outcome_improved != "yes"\` (a plateau). Otherwise the publisher refuses.
+- If the publisher refuses \`--done\`, KEEP iterating. Try orthogonal data sources,
+  different filters, different row counts, teacher-as-judge, format mutations —
+  anything you haven't tried. Mine \`experiments/KNOWLEDGE.md\` for tagged
+  \`#dead-end\` entries to know what to avoid.
 
 ## Information on the Setup
 - Important packages: \`transformers\`, \`datasets\`, \`peft\`, \`trl\`, \`accelerate\`, \`huggingface_hub\`, \`scikit-learn\`, \`numpy\`, \`openai\` (for the teacher endpoint) are all pre-installed (\`uv pip install --system\`).
 - Note: \`$MODEL_TO_TRAIN\` may be a HuggingFace hub ID OR a local path to a previously fine-tuned checkpoint. If it's a local path, the base may already exhibit certain output formatting — probe with \`--limit 3\` of the base model BEFORE forming hypotheses about format mechanics, so you don't re-fix things that are already fixed.
 {gpu_info}
-- Consider \`--limit\` of \`evaluate.py\` for faster sanity checks during development (do not use it to optimize).
+- Consider \`--limit\` of \`evaluate.py\` for faster sanity checks during development. The \`## Outcome\` numbers must still come from a \`--limit -1\` full run.
 {setup_other}
 ## Rules — read carefully
 1. There will be no user interaction. Operate autonomously.
@@ -101,17 +189,16 @@ Then NEXT iteration: exp_<N+1>'s parent is usually exp_<N> unless your conclusio
 3. **No test data in training.** \`dataset_audit.py\` enforces this; do not try to bypass it.
 4. **Do not modify** \`evaluate.py\`, \`templates/\`, \`train_sft.py\`, \`dataset_audit.py\`, or \`publish_experiment.py\`. They are read-only by policy.
 5. **Do not read peers' \`experiments/\` directories.** Your only window into peer work is \`$SHARED_LOG_CSV\`. (Filesystem isolation enforces this anyway; don't waste time trying.)
-6. **Do not publish eval scores.** \`publish_experiment.py\` will refuse \`eval_*\` / \`score_*\` fields. The official benchmark eval at time-out breaks the tie; peer signal is for strategy, not score-chasing.
-7. Work only in the current directory and subdirectories. The huggingface cache lives in the home folder and is shared.
-8. Your \`final_model/\` must be loadable by \`evaluate.py\` in this environment. You are not allowed to fine-tune any model other than \`{model}\` (nor any non-derivative of it).
-9. **Every \`exp_002+\` must cite a parent.** \`## Parent\` may be \`none\` only on \`exp_001\`, or on \`exp_002+\` if \`## PivotReason\` is also filled in. Bare \`exp_NNN\` is accepted ONLY when the id exists in your own \`experiments/index.csv\`; references to a peer's experiment from \`$SHARED_LOG_CSV\` MUST use the qualified \`<agent_id>/exp_NNN\` form. \`publish_experiment.py\` enforces this.
-10. **Do not write numeric scores in \`## Hypothesis\` or \`## Conclusion\`.** The publisher strips digits, percentages, and comparative phrases (\`better than\`, \`the best\`, \`outperforms\`, \`regression\`, etc.) from these fields before publishing. If you need to express magnitude, use qualitative language ("noticeably shorter", "matched the expected format", "still fails to stop").
-11. **Prefer underexplored parents.** Before forking the most-recently-promoted row, scan \`$SHARED_LOG_CSV\` and count how many open children each promoted experiment already has. Pick a parent with fewer current forks unless yours is a substantially different hypothesis.
-12. **You may fork promoted data from prior runs.** Promoted experiments persist their \`data.jsonl\` to \`/shared_log/promoted/<dataset_sha256>.jsonl\`. Reading from that path is allowed and encouraged when you intend to refine on top of a prior winner. Do NOT read any other \`/shared_log/\` content beyond \`shared_log.csv\` and \`promoted/<sha>.jsonl\`.
-
-13. **Stuck detector.** If 3 consecutive experiments fail to promote (i.e., your last 3 conclusions are negative or neutral), STOP refining the same parent. Instead, deliberately mutate ONE of the parent's assumptions — pick a different data source mix, drop a source that you previously thought was load-bearing, change the dominant rationale style, or use the teacher endpoint differently. The hypothesis chain compounds bad observations if you only ever refine; periodic mutation prevents you from getting stuck in a local optimum.
-
-14. **Inspect teacher-synthetic content before training on it.** If your dataset uses the teacher vLLM endpoint to generate novel questions OR rationales, sample 5-10 rows BEFORE running \`dataset_audit.py\` and read them: are the answers actually correct? Do the rationales reach the claimed answer letter? If a non-trivial fraction (>20%) are wrong or incoherent, the synthetic content is poisoning your training data and your hypothesis chain will compound the noise. Either fix the teacher prompt or fall back to mined-rationale sources.
-15. You may not invent additional flags for \`train_sft.py\`. Only \`--data-path\`, \`--output-dir\`, \`--max-steps\`, \`--seed\` are accepted.
+6. Work only in the current directory and subdirectories. The huggingface cache lives in the home folder and is shared.
+7. Your \`final_model/\` must be loadable by \`evaluate.py\` in this environment. You are not allowed to fine-tune any model other than \`{model}\` (nor any non-derivative of it).
+8. **Every \`exp_002+\` must cite a parent.** \`## Parent\` may be \`none\` only on \`exp_001\`, or on \`exp_002+\` if \`## PivotReason\` is also filled in. Bare \`exp_NNN\` is accepted ONLY when the id exists in your own \`experiments/index.csv\`; references to a peer's experiment from \`$SHARED_LOG_CSV\` MUST use the qualified \`<agent_id>/exp_NNN\` form. \`publish_experiment.py\` enforces this.
+9. **You MUST read \`experiments/KNOWLEDGE.md\` at the start of EVERY experiment.** The first read on exp_001 may show a missing/empty file — that's fine. From exp_002 onward, the file must exist.
+10. **You MUST append 1-3 tagged lines to \`experiments/KNOWLEDGE.md\` at the END of every experiment, before publishing.** Format is strict (see step 9). Tag whitelist enforced. Lines must reference the current \`exp_NNN\`.
+11. **You MUST run \`evaluate.py --limit -1 --json-output-file experiments/exp_<N>/eval_result.json\` after training and BEFORE writing \`## Outcome\`.** The improved/no/marginal judgment must be grounded in the actual score delta vs parent. The publisher cross-checks your stated \`eval_after\` against the file (tolerance 0.01); fudging is detected.
+12. **You may NOT declare \`--done\` before exp_010.** Publisher enforces this. After exp_010, \`--done\` requires the last 10 experiments to ALL have \`outcome_improved != "yes"\` (plateau).
+13. **Parent must follow the backtrack rule.** The expected parent is the most-recent local row with \`outcome_improved == "yes"\` (or \`none\` if none exists yet). If you want to fork from a non-most-recent-improved parent (e.g., to escape a local optimum after multiple failures off the same parent), you MUST include the marker \`[override:<short_reason>]\` in your \`## Method\` section. The publisher refuses an off-parent fork without that marker.
+14. **Promoted means VERIFIED improvement.** \`--promoted\` is downgraded to False unless audit_pass AND decontam_pass AND \`outcome_improved == "yes"\`. Use it to mark a row as the new candidate parent.
+15. **Inspect teacher-synthetic content before training on it.** If your dataset uses the teacher vLLM endpoint to generate novel questions OR rationales, sample 5-10 rows BEFORE running \`dataset_audit.py\` and read them: are the answers actually correct? Do the rationales reach the claimed answer letter? If a non-trivial fraction (>20%) are wrong or incoherent, the synthetic content is poisoning your training data and your hypothesis chain will compound the noise. Either fix the teacher prompt or fall back to mined-rationale sources.
+16. You may not invent additional flags for \`train_sft.py\`. Only \`--data-path\`, \`--output-dir\`, \`--max-steps\`, \`--seed\` are accepted.
 
 Remember: NEVER ask the user for feedback. Just execute. We will evaluate \`final_model\` on {benchmark} once you are done.

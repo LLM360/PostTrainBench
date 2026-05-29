@@ -365,11 +365,18 @@ if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ] && [ -d "${JOB_DIR}/task/e
     if [ -f "${JOB_DIR}/task/experiments/index.csv" ]; then
         cp "${JOB_DIR}/task/experiments/index.csv" "$EVAL_DIR/experiment_notes/index.csv"
     fi
+    # V2: the accumulating KNOWLEDGE.md is the single most valuable
+    # artifact for cross-experiment learning. Save it alongside index.csv.
+    if [ -f "${JOB_DIR}/task/experiments/KNOWLEDGE.md" ]; then
+        cp "${JOB_DIR}/task/experiments/KNOWLEDGE.md" "$EVAL_DIR/experiment_notes/KNOWLEDGE.md"
+    fi
     for exp_dir in "${JOB_DIR}/task/experiments"/exp_*; do
         [ -d "$exp_dir" ] || continue
         exp_name=$(basename "$exp_dir")
         mkdir -p "$EVAL_DIR/experiment_notes/$exp_name"
-        for fname in notes.md dataset_audit_report.json train_manifest.json source_counts.json; do
+        # V2: include eval_result.json so post-hoc analysis can compute
+        # the score chain without re-running evaluate.py.
+        for fname in notes.md dataset_audit_report.json train_manifest.json source_counts.json eval_result.json; do
             if [ -f "$exp_dir/$fname" ]; then
                 cp "$exp_dir/$fname" "$EVAL_DIR/experiment_notes/$exp_name/$fname"
             fi
@@ -528,6 +535,14 @@ esac
 run_evaluation_with_retry 2 "$MAX_TOKENS_ARG"
 
 echo $(cat "$EVAL_DIR/final_eval_${EVAL_COUNTER}.txt")
+
+# V2: snapshot the harness's own eval output under a human-friendly name
+# so it doesn't get confused with the agent's per-experiment
+# eval_result.json files. metrics.json is the canonical name read by the
+# aggregator; harness_metrics.json is the copy meant for manual review.
+if [ -f "${EVAL_DIR}/metrics.json" ]; then
+    cp "${EVAL_DIR}/metrics.json" "${EVAL_DIR}/harness_metrics.json"
+fi
 
 echo "================================"
 echo "======= EVALUATION DONE ========"

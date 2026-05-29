@@ -338,18 +338,36 @@ def _read_csv_rows(path: Path) -> list[dict]:
         return []
 
 
-def _collect_valid_parents(local_idx: Path, shared_path: str | None) -> set[str]:
+def _collect_local_parents(local_idx: Path) -> set[str]:
+    """Bare exp_ids visible in the agent's own local index.csv."""
     valid: set[str] = set()
     for row in _read_csv_rows(local_idx):
         eid = row.get("exp_id")
         if eid:
             valid.add(eid)
-    if shared_path:
-        for row in _read_csv_rows(Path(shared_path)):
-            eid = row.get("exp_id")
-            if eid:
-                valid.add(eid)
     return valid
+
+
+def _collect_shared_parents(shared_path: str | None) -> set[str]:
+    """Slashed `<agent_id>/<exp_id>` ids from the shared CSV.
+
+    Cross-agent references MUST be qualified with the publishing agent id
+    because every agent independently produces exp_001, exp_002, ... so a
+    bare exp_id is ambiguous across agents (PR #6's tree renderer also
+    relies on the slashed form to disambiguate).
+    """
+    valid: set[str] = set()
+    if not shared_path:
+        return valid
+    for row in _read_csv_rows(Path(shared_path)):
+        eid = row.get("exp_id")
+        aid = row.get("agent_id")
+        if eid and aid:
+            valid.add(f"{aid}/{eid}")
+    return valid
+
+
+_SLASHED_PARENT_RE = re.compile(r"^[A-Za-z0-9._\-]+/exp_\d+$")
 
 
 def validate_parent(
@@ -360,16 +378,21 @@ def validate_parent(
 ) -> str:
     """Validate the ## Parent value and return it.
 
-    Rules:
-    - exp_001: parent may be 'none'.
-    - exp_002+: parent must be 'none' with ## PivotReason, OR must appear in
-      the local index.csv or the shared CSV.
+    Two accepted forms:
+    - Bare `exp_NNN` — same-agent parent. Must exist in the agent's own
+      local index.csv. The shared CSV is NOT consulted for the bare form
+      because exp_NNN is ambiguous across agents.
+    - Slashed `<agent_id>/exp_NNN` — cross-agent (or own past) parent. Must
+      have a matching (agent_id, exp_id) row in $SHARED_LOG_CSV.
+    - `none` — valid only for exp_001, or for exp_002+ with ## PivotReason.
     """
     parent_raw = sections.get("Parent", "").strip()
     if not parent_raw:
         raise SystemExit(
             "notes.md is missing the ## Parent section. "
-            "Use 'exp_<K>' or 'none' (none requires ## PivotReason for exp_002+)."
+            "Use 'exp_<K>' (your own prior experiment), "
+            "'<agent_id>/exp_<K>' (peer's experiment from $SHARED_LOG_CSV), "
+            "or 'none' (requires ## PivotReason for exp_002+)."
         )
     # Take the first non-empty line of the section body as the value.
     parent_value = ""
@@ -389,19 +412,36 @@ def validate_parent(
             f"could not parse exp number from directory name {exp_dir.name!r}"
         )
 
+    def _check_value(value: str) -> bool:
+        """Return True iff `value` is a recognized parent reference."""
+        if "/" in value:
+            if not _SLASHED_PARENT_RE.match(value):
+                return False
+            return value in _collect_shared_parents(shared_path)
+        # Bare exp_NNN — local same-agent only.
+        return value in _collect_local_parents(local_idx)
+
+    def _fail(value: str) -> None:
+        local_recent = sorted(_collect_local_parents(local_idx))[-10:]
+        shared_recent = sorted(_collect_shared_parents(shared_path))[-10:]
+        raise SystemExit(
+            f"## Parent={value!r} not recognized. "
+            "Use 'exp_NNN' for your own past experiments "
+            "(must appear in local experiments/index.csv), or "
+            "'<agent_id>/exp_NNN' for peers' experiments "
+            "(must appear in $SHARED_LOG_CSV with matching agent_id). "
+            f"Recent local: {local_recent or '(none)'}. "
+            f"Recent shared: {shared_recent or '(none)'}."
+        )
+
     if exp_n == 1:
         # exp_001: parent may be 'none' or a valid prior id (cross-run).
         if parent_value == "none":
             return parent_value
-        # Allow cross-run parents even for exp_001 if they exist in shared.
-        valid = _collect_valid_parents(local_idx, shared_path)
-        if parent_value in valid:
+        if _check_value(parent_value):
             return parent_value
-        # exp_001 with an unknown parent: accept 'none' fallback message.
-        raise SystemExit(
-            f"exp_001 ## Parent={parent_value!r} not found; use 'none' "
-            f"or a known exp_id from $SHARED_LOG_CSV."
-        )
+        # exp_001 with an unknown parent — same diagnostic as exp_002+.
+        _fail(parent_value)
 
     # exp_002+
     pivot_reason = sections.get("PivotReason", "").strip()
@@ -413,15 +453,10 @@ def validate_parent(
             "is present and non-empty."
         )
 
-    valid = _collect_valid_parents(local_idx, shared_path)
-    if parent_value in valid:
+    if _check_value(parent_value):
         return parent_value
-
-    recent = sorted(valid)[-10:] if valid else []
-    raise SystemExit(
-        f"## Parent={parent_value!r} not found in local index.csv or "
-        f"$SHARED_LOG_CSV. Recent valid parents: {recent or '(none yet)'}."
-    )
+    _fail(parent_value)
+    return parent_value  # unreachable; _fail raises
 
 
 def _validate_required_sections(

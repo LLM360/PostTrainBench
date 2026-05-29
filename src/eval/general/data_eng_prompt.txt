@@ -46,7 +46,7 @@ resp = client.chat.completions.create(
 
 For each experiment exp_<N>:
 
-1. **READ PRIOR.** \`tail -n 50 $SHARED_LOG_CSV\`. Also read your own \`experiments/exp_<K>/notes.md\` for each K < N. Identify your candidate parent: typically the most recently published row with \`audit_pass=True\` and a positive \`conclusion_short\`. CHECK how many peers already cite that parent_exp_id; prefer parents with fewer existing children to keep parallel exploration broad. If a \`promoted=True\` row exists from a prior run, you may fork its actual data — it lives at \`/shared_log/promoted/<dataset_sha256>.jsonl\`.
+1. **READ PRIOR.** \`tail -n 50 $SHARED_LOG_CSV\`. Also read your own \`experiments/exp_<K>/notes.md\` for each K < N. Identify your candidate parent: typically the most recently published row with \`audit_pass=True\` and a positive \`conclusion_short\`. CHECK how many peers already cite that parent_exp_id; prefer parents with fewer existing children to keep parallel exploration broad. If a \`promoted=True\` row exists from a prior run, you may fork its actual data — it lives at \`/shared_log/promoted/<dataset_sha256>.jsonl\`. Parent ids in \`$SHARED_LOG_CSV\` come in pairs \`(agent_id, exp_id)\` — bare \`exp_NNN\` is ambiguous across agents, so when you reference a peer's row use the qualified form \`<agent_id>/<exp_id>\` (see step 3).
 
 2. **FORMULATE HYPOTHESIS.** A 1–3 sentence falsifiable claim that changes ONE variable from your parent. State the predicted observable. Good examples:
    - "If we strip the Inspect MCQ template prefix from user prompts, distinct_1g will clear the gate at row_count >= 1200 because the prefix dominated the unigram counts."
@@ -58,7 +58,9 @@ For each experiment exp_<N>:
    # exp_<N>
 
    ## Parent
-   exp_<K>           # or "none" only for exp_001, OR if you're pivoting (then also fill ## PivotReason)
+   exp_<K>           # bare form: your OWN prior experiment (must exist in experiments/index.csv)
+                     # OR <agent_id>/exp_<K>: a peer's experiment from $SHARED_LOG_CSV (REQUIRED form for cross-agent forks — bare exp_K from a peer is rejected because every agent independently has its own exp_001, exp_002, ...)
+                     # OR "none" only for exp_001, OR if you're pivoting (then also fill ## PivotReason)
 
    ## Hypothesis
    <your hypothesis from step 2>
@@ -102,7 +104,7 @@ Then NEXT iteration: exp_<N+1>'s parent is usually exp_<N> unless your conclusio
 6. **Do not publish eval scores.** \`publish_experiment.py\` will refuse \`eval_*\` / \`score_*\` fields. The official benchmark eval at time-out breaks the tie; peer signal is for strategy, not score-chasing.
 7. Work only in the current directory and subdirectories. The huggingface cache lives in the home folder and is shared.
 8. Your \`final_model/\` must be loadable by \`evaluate.py\` in this environment. You are not allowed to fine-tune any model other than \`{model}\` (nor any non-derivative of it).
-9. **Every \`exp_002+\` must cite a parent.** \`## Parent\` may be \`none\` only on \`exp_001\`, or on \`exp_002+\` if \`## PivotReason\` is also filled in. \`publish_experiment.py\` enforces this.
+9. **Every \`exp_002+\` must cite a parent.** \`## Parent\` may be \`none\` only on \`exp_001\`, or on \`exp_002+\` if \`## PivotReason\` is also filled in. Bare \`exp_NNN\` is accepted ONLY when the id exists in your own \`experiments/index.csv\`; references to a peer's experiment from \`$SHARED_LOG_CSV\` MUST use the qualified \`<agent_id>/exp_NNN\` form. \`publish_experiment.py\` enforces this.
 10. **Do not write numeric scores in \`## Hypothesis\` or \`## Conclusion\`.** The publisher strips digits, percentages, and comparative phrases (\`better than\`, \`the best\`, \`outperforms\`, \`regression\`, etc.) from these fields before publishing. If you need to express magnitude, use qualitative language ("noticeably shorter", "matched the expected format", "still fails to stop").
 11. **Prefer underexplored parents.** Before forking the most-recently-promoted row, scan \`$SHARED_LOG_CSV\` and count how many open children each promoted experiment already has. Pick a parent with fewer current forks unless yours is a substantially different hypothesis.
 12. **You may fork promoted data from prior runs.** Promoted experiments persist their \`data.jsonl\` to \`/shared_log/promoted/<dataset_sha256>.jsonl\`. Reading from that path is allowed and encouraged when you intend to refine on top of a prior winner. Do NOT read any other \`/shared_log/\` content beyond \`shared_log.csv\` and \`promoted/<sha>.jsonl\`.

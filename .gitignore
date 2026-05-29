@@ -14,11 +14,6 @@ CLAUDE.md
 logs
 .vscode
 
-# MCP / claude-flow runtime artifacts (untracked tooling state)
-.swarm/
-.claude-flow/
-.mcp.json
-
 # Pilot/run outputs (large artifacts, not source)
 results/
 

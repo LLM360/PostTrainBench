@@ -41,7 +41,7 @@ def check_h100():
         props = torch.cuda.get_device_properties(i)
         print(f"  GPU {i}: {name} ({props.total_memory / 1e9:.1f} GB)")
 
-        if "H100" in name:
+        if "H100" in name or "H200" in name:
             h100_found = True
 
             # Check for running processes on this GPU
@@ -57,9 +57,9 @@ def check_h100():
                 print(f"  ✓ GPU {i} is idle")
 
     if h100_found:
-        print(f"✓ H100 detected ({device_count} GPU(s))")
+        print(f"✓ H100/H200 detected ({device_count} GPU(s))")
     else:
-        print("❌ No H100 found")
+        print("❌ No H100/H200 found")
         return False
 
     # Check that writing a CUDA tensor works on each GPU

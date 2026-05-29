@@ -147,52 +147,117 @@ def load_test_decontam(path: Path) -> tuple[set[str], dict[str, list[str]]]:
     return sha_set, shingle_index
 
 
+def _scan_text_for_contam(
+    text: str,
+    sha_set: set[str],
+    shingle_index: dict[str, list[str]],
+) -> dict | None:
+    """Return a violation dict for `text` if it hits the test set, else None.
+
+    The exact-SHA path normalizes the text and hashes; the shingle path
+    splits into 8-grams and counts how many appear in the test shingle
+    index. Both paths share the same normalize() so a short prompt that
+    matches a test item exactly still flags via SHA even when shingles
+    are too few to clear the overlap threshold.
+    """
+    norm = normalize(text)
+    if not norm:
+        return None
+    row_sha = sha256_hex(norm)
+    if row_sha in sha_set:
+        return {"kind": "sha256_exact"}
+    shingles = shingle_set(norm)
+    hits: dict[str, int] = {}
+    for sh in shingles:
+        h = shingle_hash(sh)
+        for tid in shingle_index.get(h, ()):
+            hits[tid] = hits.get(tid, 0) + 1
+    if hits:
+        tid, overlap = max(hits.items(), key=lambda x: x[1])
+        if overlap >= DECONTAM_SHINGLE_OVERLAP_MIN:
+            return {
+                "kind": "shingle_overlap",
+                "test_id": tid,
+                "overlap": overlap,
+                "threshold": DECONTAM_SHINGLE_OVERLAP_MIN,
+            }
+    return None
+
+
 def check_decontam(rows: list[dict], test_path: Path) -> dict:
-    """Scan ALL message turns (user + assistant + system) against the test set.
+    """Scan each message turn AND the combined concatenation against the test set.
 
     A contaminated row can hide the benchmark text in a system or assistant
-    message; scanning only the user turn would let that slip past the gate.
+    message, so we scan every message individually (defense against split
+    hiding). We ALSO run the original combined-string scan as defense-in-
+    depth so a contamination split across two adjacent turns whose shingle
+    union covers the test item still trips the gate.
+
+    Per-message scanning is required for the exact-SHA path: a row like
+    user=<short test question>, assistant=<answer> never matches the test
+    SHA when hashed as one combined string (the answer changes the hash),
+    so without per-message hashing the exact-SHA check becomes useless for
+    short prompts that don't have enough 8-grams to clear the shingle
+    overlap threshold.
     """
     sha_set, shingle_index = load_test_decontam(test_path)
     violations: list[dict] = []
+
+    def record(v: dict) -> bool:
+        """Append violation; return True if MAX_REPORTED_VIOLATIONS reached."""
+        violations.append(v)
+        return len(violations) >= MAX_REPORTED_VIOLATIONS
+
     for i, row in enumerate(rows):
-        combined = extract_all_content(row, i)
-        norm = normalize(combined)
-        row_sha = sha256_hex(norm)
-        if row_sha in sha_set:
-            violations.append(
-                {"row": i, "kind": "sha256_exact", "first_80": combined[:80]}
-            )
-            if len(violations) >= MAX_REPORTED_VIOLATIONS:
-                break
-            continue
-        shingles = shingle_set(norm)
-        hits: dict[str, int] = {}
-        for sh in shingles:
-            h = shingle_hash(sh)
-            for tid in shingle_index.get(h, ()):
-                hits[tid] = hits.get(tid, 0) + 1
-        if hits:
-            tid, overlap = max(hits.items(), key=lambda x: x[1])
-            if overlap >= DECONTAM_SHINGLE_OVERLAP_MIN:
-                violations.append(
-                    {
+        flagged_this_row = False
+        msgs = row.get("messages") if isinstance(row, dict) else None
+        if isinstance(msgs, list):
+            for msg_idx, m in enumerate(msgs):
+                content = str(m.get("content", "") if isinstance(m, dict) else "")
+                if not content:
+                    continue
+                role = m.get("role", "?") if isinstance(m, dict) else "?"
+                hit = _scan_text_for_contam(content, sha_set, shingle_index)
+                if hit is not None:
+                    v = {
                         "row": i,
-                        "kind": "shingle_overlap",
-                        "test_id": tid,
-                        "overlap": overlap,
-                        "threshold": DECONTAM_SHINGLE_OVERLAP_MIN,
-                        "first_80": combined[:80],
+                        "scope": "per_message",
+                        "role": role,
+                        "message_index": msg_idx,
+                        "first_80": content[:80],
+                        **hit,
                     }
-                )
-                if len(violations) >= MAX_REPORTED_VIOLATIONS:
+                    flagged_this_row = True
+                    if record(v):
+                        return {
+                            "pass": False,
+                            "violations": violations,
+                            "test_items_loaded": len(sha_set),
+                            "shingle_overlap_threshold": DECONTAM_SHINGLE_OVERLAP_MIN,
+                            "scope": "per_message+combined",
+                        }
+        # Defense-in-depth: combined-all-messages scan. A contamination
+        # that's split across two adjacent turns (so neither single
+        # message clears the shingle threshold, but their union does) is
+        # only caught here.
+        if not flagged_this_row:
+            combined = extract_all_content(row, i)
+            hit = _scan_text_for_contam(combined, sha_set, shingle_index)
+            if hit is not None:
+                v = {
+                    "row": i,
+                    "scope": "combined_all_messages",
+                    "first_80": combined[:80],
+                    **hit,
+                }
+                if record(v):
                     break
     return {
         "pass": not violations,
         "violations": violations,
         "test_items_loaded": len(sha_set),
         "shingle_overlap_threshold": DECONTAM_SHINGLE_OVERLAP_MIN,
-        "scope": "all_messages",
+        "scope": "per_message+combined",
     }
 
 
@@ -348,7 +413,18 @@ def main() -> int:
     if not decontam["pass"]:
         print(f"  decontam: {len(decontam['violations'])} violation(s)", file=sys.stderr)
         for v in decontam["violations"][:5]:
-            print(f"    row {v['row']} ({v['kind']}): {v.get('first_80', '')!r}", file=sys.stderr)
+            scope = v.get("scope", "?")
+            if scope == "per_message":
+                where = (
+                    f"row {v['row']} msg[{v.get('message_index')}] "
+                    f"role={v.get('role', '?')!r}"
+                )
+            else:
+                where = f"row {v['row']} ({scope})"
+            print(
+                f"    {where} ({v['kind']}): {v.get('first_80', '')!r}",
+                file=sys.stderr,
+            )
     if not diversity["pass"]:
         print("  diversity:", file=sys.stderr)
         for fail in diversity["failures"]:

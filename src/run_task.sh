@@ -73,6 +73,13 @@ if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ]; then
     cp src/eval/general/train_sft.py "${JOB_DIR}/task/"
     cp src/eval/general/dataset_audit.py "${JOB_DIR}/task/"
     cp src/eval/general/publish_experiment.py "${JOB_DIR}/task/"
+    # eval.sh wrapper: codex's `bash -lc` overwrites PATH and strips
+    # /opt/env/local/bin, so calling `python3 evaluate.py` directly fails
+    # to find the bind-mounted `vllm` CLI. This wrapper re-asserts PATH
+    # before exec'ing evaluate.py. Agents should `bash eval.sh ...` for
+    # self-evals.
+    cp src/eval/general/eval.sh "${JOB_DIR}/task/"
+    chmod +x "${JOB_DIR}/task/eval.sh"
     mkdir -p "${JOB_DIR}/task/experiments"
 fi
 

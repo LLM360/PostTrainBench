@@ -34,6 +34,20 @@ def truthy(v):
     return str(v).strip().lower() in ("true", "t", "1", "yes", "y", "pass")
 
 
+def promoted_value(row):
+    """Read the schema-v3 `promoted` column with legacy fallback.
+
+    Schema v3 (added in PR #5) writes an explicit `promoted` flag that
+    captures the full promotion decision (decontam + audit + dataset
+    gates). Older rows only have `decontam_pass`, so fall back to that
+    only when `promoted` is absent or empty.
+    """
+    val = row.get("promoted")
+    if val is None or str(val).strip() == "":
+        val = row.get("decontam_pass", "")
+    return str(val).strip().lower() in ("true", "1", "yes")
+
+
 def wrap_block(label, text, width, indent):
     """Wrap `text` with continuation lines indented under `indent`."""
     text = (text or "").strip().replace("\n", " ").replace("\r", " ")
@@ -60,7 +74,7 @@ def render_node(row, depth, last_stack, width, xagent_note=""):
 
     audit = "T" if truthy(row.get("audit_pass", "")) else (
         "F" if row.get("audit_pass") not in (None, "") else "?")
-    promoted = "T" if truthy(row.get("decontam_pass", "")) else "F"
+    promoted = "T" if promoted_value(row) else "F"
     legacy_tag = " [legacy]" if row.get("_legacy") else ""
     orphan_tag = row.get("_orphan_tag", "")
     xa = f" {xagent_note}" if xagent_note else ""
@@ -186,7 +200,7 @@ def build_and_render(rows, width):
 
     # Footer
     total = len(rows)
-    promoted = sum(1 for r in rows if truthy(r.get("decontam_pass", "")))
+    promoted = sum(1 for r in rows if promoted_value(r))
     audit_pass = sum(1 for r in rows if truthy(r.get("audit_pass", "")))
     most_forked = max(parent_counts.items(), key=lambda kv: kv[1], default=None)
     out_lines.append("")

@@ -559,6 +559,21 @@ def main() -> int:
                 "has changed since it was audited; re-run dataset_audit.py."
             )
 
+    # Compute one effective promotion flag and use it everywhere: the shared
+    # CSV row, the local index row, and the /shared_log/promoted/<sha>.jsonl
+    # persistence guard. The schema treats promoted=True as the cross-run
+    # handoff signal, so we MUST NOT advertise promoted=True on a row whose
+    # audit or decontam check failed — peers would then fork a dataset that
+    # never actually got persisted to /shared_log/promoted/.
+    effective_promoted = bool(args.promoted and audit_pass and decontam_pass)
+    if args.promoted and not effective_promoted:
+        print(
+            "[publish] WARNING: --promoted requested but "
+            f"audit_pass={audit_pass} / decontam_pass={decontam_pass}; "
+            "recording promoted=False",
+            file=sys.stderr,
+        )
+
     # All four free-text fields written to the shared CSV are scrubbed the
     # same way — strategy_short and notes_excerpt would otherwise let eval
     # scores or comparative score language leak through. extract_strategy
@@ -592,7 +607,7 @@ def main() -> int:
         "audit_pass": audit_pass,
         # Promoted rows are the cross-run handoff signal — peers in future
         # runs look for promoted=True to find datasets worth forking.
-        "promoted": bool(args.promoted),
+        "promoted": effective_promoted,
         "notes_excerpt": notes_excerpt,
     }
     reject_forbidden(shared_row)
@@ -614,7 +629,7 @@ def main() -> int:
         "strategy_short": strategy_short,
         "row_count": rows,
         "audit_pass": audit_pass,
-        "promoted": bool(args.promoted),
+        "promoted": effective_promoted,
         "dataset_sha256": data_sha,
         "parent_exp_id": parent_value,
         "hypothesis_short": hypothesis_short,
@@ -624,7 +639,7 @@ def main() -> int:
     print(f"[publish] local row → {local_idx}")
 
     # Persist promoted data for cross-run reuse.
-    if args.promoted and audit_pass and shared_path and data_sha:
+    if effective_promoted and shared_path and data_sha:
         target = _persist_promoted_data(shared_path, data_path, data_sha)
         if target is not None:
             print(f"[publish] promoted data → {target}")

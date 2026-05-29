@@ -1,0 +1,450 @@
+# Idavidrein/gpqa::gpqa_main::train
+# format: <sha256>\t<shingle_count>\t<first_50_chars>
+11db9f0a29788e94695efab1e8c37cd9e3fb976ef6139f050a1f7ce09fba0396	107	A large gene has dozens of exons, of which the cen
+d9506122a1364c4000420325be36bafdd23f56cd39958963db25bcc41af64886	40	Two quantum states with energies E1 and E2 have a 
+e6d98603f79fad8cb3bf5e03b9573d569d7760a9cd6a961e86678d31224305fb	38	trans-cinnamaldehyde was treated with methylmagnes
+ab9c7690806662b87ba7984b9cf494e9cd56bd6e291b5369314c5cdddf7be326	66	how many of the following compounds exhibit optica
+be5162be1a61fdd0ce178acdff043710de5cc651f26c066469bbbe29914fc2cc	100	A coating is applied to a substrate resulting in a
+42fdb5c8c6ab539873f9acbf1fb74ab659035aaf5ce7fc127e16b0992114b00e	33	Consider the following metric:  ds^{2}=\frac{32}{\
+e4997b5806b8bca10fa97fc73229146b7c43369f788b1f444c2cad3873f3fa00	44	aniline is heated with sulfuric acid, forming prod
+bb0898486283c4fda066ab48879117c9ada6d405d8689884b96016535925e600	57	A spin-half particle is in a linear superposition 
+4fb5ccddc7ae290af6c684ae25691c26292aefebcb413c56d956be91bf38acef	21	In a parallel universe where a magnet can have an 
+df6644a1dd78ac259d8fa13d70583c22d2876b8f3d7e135709ddab83ba513e89	50	In a cycloaddition reaction, two π systems combine
+8d9b3594032bebd6934a6626990cdd8302de3afb2da9b2305958e350c8555691	89	To investigate the causes of a complex genetic dis
+1b1fea2a457fb070a18c80b774b74f4491fd7d4f44829978dc599374fa47da19	42	We would like to dissolve (at 25°С) 0.1 g Fe(OH)3 
+ebbfccc8de61df9aaf7c72d1b5740444b425f295af28fd2a8c82d2ddb13494b3	133	Calculate the eigenvector of a quantum mechanical 
+74c377a0968bbd05230b2bdc926f48671ba197d3051774086cf837aaae479413	32	A quantum mechanical particle of mass m moves in t
+d21729e834d4e6e1d97b792ac84872b0b3766ab91640e75b9178d24fdc3eca4e	112	Scientist 1 is studying linkage maps in Drosophila
+ff082a316ba2c6d61fda3f7fd6514344586b90134f5cd23741cc5ee9e9ef67de	62	Which of the following statements is a correct phy
+7dff76b71869cdc31a9df42bd224738c304897c6e13818e2afd858d053b9c33d	56	The universe is filled with the Cosmic Microwave B
+dc2567c74f89e9a615a54d904dfc7a11fc451417d91d3ccce6ad8f53f55dd7c2	188	You perform a high-throughput experiment on white 
+cee20c9635273ebac10ec536e4bde2ea906917352a8580652ccbffb688e6f34f	48	When 49 g of KClO3 decomposes, the resulting O2 re
+fa76330045ea68f23a1830e7e6ccbf4283544897f6555717db99116124968608	40	which of the following molecules has c3h symmetry?
+753967d29ea81e9695a7a7dd26210f4a4f2d68c623be873d27022c7a85ae7380	12	Why does the hydroboration reaction between a conj
+1da82d946bc70e493f6531969b43dbc07c297494bec741147e91d9f90a086388	79	Let an infinite plate, with conductivity sigma, li
+ead5c8679984fa1634e8f0d3976812af0135bb03d432e3ae02110990d3e1457f	103	In the last few decades, reverberation mapping, in
+49b50130705ab8b788fb09d2aa4576b43da7b11bab94b5dc3006c87161f20795	102	A coating is applied to a substrate resulting in a
+73f0b4485bf995acc63faf3fe8272e63901a063a2f687e4705e46522e436ab9b	104	Astronomers are studying two binary star systems: 
+a271cb542f8adb73db5394adb9e0b443915a71e6d0b3ce93a8c61951008b9bfb	3	The experimental proof for the chromosomal theory 
+0073c868deb002c2a4155d5a340282243d4e8009d7079186970b01034d531595	20	"Scientist aims to analyze 200 nucleotides that ar
+cee702846acc5c2da8ca7bb20dd57546068e050695f1ff32171171c673a56028	127	In an industrial research lab, a scientist perform
+8768e7f57959c1556dddfbd4dce6c9621ac535d442ad4160bfbffad557720a04	36	A chemist performed a reaction on 2,3-diphenylbuta
+810f18d75924851dd516fb36cb57a383bd2db3351034e57a4ca1f4a36fe3fccd	57	Among the following exoplanets, which one has the 
+360ee16798826daa8b17d56bd93d7f2134334a779397a21042ee441c88c05e79	14	All the following statements about the molecular b
+24b4e5f4754dca5a89ef469d23adc38837382db50a1acbe5f7bc6ff979ec1ec0	58	You are interested in studying a rare type of brea
+4b655d090fd39b1cae1ffceca5df984efe4c1aeab4cb3fe487934227f70475dd	19	Find KE of product particles in, Pi(+) = mu(+) + n
+c88f16820fd69a17d19e49ebc6e695dd184213884e5515508ad6e9ff631bc2ef	51	Measuring stellar inclinations is fundamental in b
+3438ad61959f30d2d24b664c23ce3e6b8a1fccece23c56ea67eecd58a884463a	84	A methanol solution of (R)-(+)-Limonene is stirred
+6dada0adefb4cee755654661710eb9484be563e7e8fc5456a18b907be5f4538e	47	ChIP-seq on a PFA-fixed sample with an antibody to
+0a47180925829f0c967c82fbd15f3f6fc1d4cdd1e83e5972cf8d4738525376d9	34	methyl isoamyl ketone is treated with hydrogen per
+46a32d8b713edf35577eab0558149023455ec6c2a25fcf9b4eb998f1ef5bfd9e	8	Identify the final product produced when cyclobuty
+20574a3af21017dc32575c494ef9de6d734963c18e55c333aec107af9f2c6113	131	Researchers are attempting to detect transits of t
+d2f12979adb779d25736cba0f7827edb87e68b3530b97e128fd6272fb3936724	65	The majority of stars in our Galaxy form and evolv
+f799d31a425c24acc2c01feaa6d1fc36ff7e398b319e4a3ac5e5a86605268a64	54	How many of the following compounds will exhibit o
+6207227eb7e40bd092515071e59aecc9ee0408459716832032bed1ad5bd02e52	40	"Consider the following compounds: 1: 7,7-difluoro
+94c5a3efaf69128aa933f61bcf456f9cacdd10271d07157f62828909100bd5cb	45	A paper you are reading about the seesaw mechanism
+afadf52a8ab668808e2e15a2eaae56036c208cbf6097f96afd1134446c423165	72	v-FLIPS are viral proteins that were first identif
+5b41b398854f4c92d0166def62d226b5e9201bb6ba7f3e172373f58c87cca030	138	Consider the extension of the Standard Model given
+c220599496276e9d755cafaaca750f4b58219238786f7f001167e6ab3bb0f728	25	What is the concentration of calcium ions in a sol
+9671e47997f45d385140d5df1fabd567c9e64a5bfa9d3697eafbc561b253f9cf	85	Two stars (Star_1 and Star_2) each have masses 1.5
+9ae4c525e429bd3fb69b4b04f08d42590df26311e82c55a8a3fde19c6f280596	7	Which of the following statements about enhancers 
+57d131ec4a5e01672b88d046ddf2afdebcaab71a6fbe48cb5eb67e699f6e1f46	110	The Paranal Observatory is situated in Chile at ap
+9a76e7ab2f8c8ac72036cab1507054dfce9320e54199992367160ff2b96f4e66	40	You have prepared a tri-substituted 6-membered aro
+d6e24a47ffb90cab2c6d454f12cb7fe13a805923182777de45886cc613009a98	102	The Michael reaction is a chemical process in orga
+2354b28bbddd81f069788496b23de90ac9468f30163eb7d93bf78c9cb1ea0da4	80	A common approximation made in many-body nuclear c
+d3cfa98d09529a588d08cb7e01fc2c92b22ffa76a84c4cc23c32bdad0b12c3ac	109	Consider a uniformly charged metallic ring of radi
+3dc7052b0063d3e8561591de33b853757452458d3ecbc8cb590149c880d9364e	80	Compounds that have the same molecular formula but
+10b9dbdf70d78c6fe8903303070b2243a6b8f5fd8cbb2da6238925b1a6c6e858	97	Calculate the amount of non-Gaussianity(nG) in the
+43eacb76be0787b79994deebee1a03cac3449c5b7534db6a9211c9a08d109103	200	A series of experiments are conducted to unravel t
+d418d57c4da20306c95f87e243ee27abec34366ca2a764e0e425150220d28f08	37	A student regrets that he fell asleep during a lec
+91baa6f5d51cb69f284b7a3af22acfbe7479da49b4a59f2961b746600ee328c3	48	In an experiment, a researcher reacted ((2,2-dimet
+3c016d3b2cfa9c91474d7366bf651da001fbe11909a2141e75d99c9d9a3acd74	114	If an equimolar mixture X of two liquids, which de
+a5ae9d2aff2e8953b0400f4a5a5a12c85b407f59310caff45ec425c4e9519061	29	Which of the following issues are the most common 
+7b4f380d7d45d84966b50079399e60466520f6bca45f3175e5972b759e12accd	77	Name reactions in chemistry refer to a specific se
+8b6697eb181efb761617f2c8a3c12223ea65c3885eb78121ad952149bd0c6ab1	61	Enya and John are of normal phenotype but they hav
+46fd0324eecd6c6b824a796ab0055de20e3b36c8c89265f9cb7d5cf059a095a8	37	You want to cultivate a population of mouse embryo
+5431d85c4c6ba25473baf5f3bae9c974a9ee077710dd47e6ec40b70c595cacef	106	Dienes are organic compounds with two adjacent dou
+efec6cc947a213680c45a4f897f22507fa18133f1c234ac438913bb11a77dfe1	81	You are studying a nuclear decay which converts tw
+0dbfba6b330caf00b265cd7866c3edbc0a9e6836138f2cd023a84abf51ad9320	52	"Oh, I know you," the ribonucleoprotein particle s
+37106b9be15b3f88bbed75134550066ed1a3df1d5bfd6fd6a38a1c88e86b4a9c	54	A research group is investigating the production o
+a5fbb6783d7efcbb61d58d9010d4a6b23702eb9d4adf5beb811f69d4ff8221f2	57	S)-4-hydroxycyclohex-2-en-1-one is treated with te
+66a6293db8bf4619b61327a085d49c1e4fdaf6ea47dc23c39669d300caf278b8	76	You have prepared an unknown product with the chem
+34628932e12c4ccc0826947e5e4957a1fad03cf398dad73e49d0f234bc22ee78	33	methyl 2-oxocyclohexane-1-carboxylate is heated in
+d94c138638438329e9452186c13602b84356432ba516f00482f6688547c0ea10	84	A reaction of a liquid organic compound, which mol
+90316efe1c0c6a17f8dd4861b75082391ce0d442bd7852063825dd927ae55566	135	You have an interesting drought-resistant cultivar
+8167521f51c35cfe0407d458aa59eb7df1ee1571953d7d6cede61114642711dc	20	A textile dye containing an extensively conjugated
+c04d76620708c64df5807beda3664bd14cfb9284e063d71b821936932d1e67d7	35	toluene is treated with nitric acid and sulfuric a
+d7da11c25c7e64ee16a80579f1602ae1f8f9a154f3553db481863765015719d6	45	When 500 mL of PH3 is decomposed the total volume 
+05bcd841794895c8236a2ee9e4399bd485e98d6ed75c9d7094d651204e7e551e	70	What is the parallax (in milliarcseconds) of a sta
+e934ab80d60c3434aff032666bb3c26992143d270f73b13e4ebc01792461e675	37	What is the energy of the Relativistic Heavy Ion C
+dc972b90af605f5e9cfd323c853f76e9a9f22568b4a6a4a478547f655d35cab9	27	An electron is in the spin state (3i, 4). Find the
+d375698e754386467ce2a81cf291df2c8870acfff14f5d8ff5d43b13dc5e801d	67	There are two spin 1/2 nuclei in a strong magnetic
+0942eb5aaa2d8a068ef58ad160548ad63981d374e3084b5810d1725aad1a3719	57	Suppose you are studying a system of three nucleon
+eaf91f3b6ab046eca8286c0b247cc2f232d1ad212b96da89f25a39735475cacb	40	Sirius is the brightest star in the sky. The tempe
+8009098746b6a4935badb62284c8598d4431aeb0d02460837d33f28b03651b64	88	Consider an electromagnetic wave incident on an in
+e88267262464a97f2a43b17d8e0ac24c40993764c22e5e3464ba83b44dad20bd	12	Identify the EXO product of the following [4+2] cy
+ac939bb6f245fbd489ce85befbba0d6dc203cbd0a70ad18b607e5f5d0c9c5146	86	We mix 20 cm3 0.1 M CH₃COOH with 40 cm3 0.02 M NaO
+48ea8b263683f4191b72a2becbc615c3cfeed35475ef4dffefc5ddec7b22eb26	69	Suppose we have a depolarizing channel operation g
+2849aec2df64b7c64b5f755eec3427bdae915a7432b23d0ffdb1132c595940de	92	In a quantum dialog protocol a 4-mode continuous v
+7a1bdb71b1c5284ef9b2c7fa3fd0f400b9d3e965b9b77b6bb045086d4177e03c	114	ChIP-seq detected a highly significant binding sig
+5282d4a68e0c483aba732c4503ed6b3c069117d16e25af25356eee540426cd11	76	"1,2-Rearrangement reaction in which vicinal diols
+e4346c6b054a8d880a630444d47a6b5f9b9820d91f8c857b8e603c24d784e306	56	Arrange given compounds (1. Acetophenone, 2. propa
+b0707d946875d5a72a4a51b74e950c744a22d45e80da2e8af02430528df21cc3	15	Ozonolysis of compound A produces 3-methylcyclopen
+9a571399ffde9aff7755174cce09a329544c25d51087566f48bed557f9bb5ccd	96	Consider the Y-component of the intrinsic angular 
+d92f7b1311af672480a3dd5cd26a3b44d64d93f36fba14ab3f2d67ebe4b920c3	59	You have a 10 uL aliquot of a 10 uM DNA template o
+5d191774f9645fe69b29729f60da58e834f90b79604b374543b22df775a625fc	45	Observations of structures located at a distance o
+37a54b1cd57ca4ba4d7fa4159dc1a991a3d969a40e91a312dfa808c005239501	37	Identify the number of 13C-NMR signals produced by
+663ca98db9e93438591b2591c5e4393f4aecd44e808f5d9d59f2c80e777fa6f4	60	In autumn, tree leaves get colourful and drop down
+ae64e366cf6d682341b97bf346a679d98439d4144a916c3eefd3b9bdd92a1ebd	55	Substances 1-6 undergo an electrophilic substituti
+272c3a8faae6c305e6957581dd5fcab32a8a7096f8280bdf0b85048819e3f7a2	6	Which of the following data sets corresponds to an
+da56231109afbd57f0405472cf1350703d6828643c2ec3931d007192b8e030b5	68	Consider a stack of N optical layers (made of a ma
+792c269b5bac17918f6ac60dcf66ded50cffcca7ba8f342cb817a64a2510835c	55	bicyclo[2.2.2]octan-2-one is irradiated with ultra
+8aa7c5838218aa6670207a3e9c42272aac2514b4111c56b8227ce1a62508ebda	44	The water and oil contact angles on a smooth clean
+6f649ac33b97f1d030e63a7be81391d0628c5949e21f680f72935767cdee4201	21	In the alkylation reaction of benzene with ethylen
+08056088d038bb625a5d99d4f84e080da1b740774d7531acca6a09bf0a03b138	194	A molecule consists of three atoms with spin ½ eac
+ce8151a07d59779a0afbf5a3f87ddecd8ad2b22cd02ba4a2eb034f866c2f16b7	59	Enamine reactions include nucleophilic substitutio
+ed07f9e1a2689adb3d963041069c9e8d23b3e7cf9e81f22773aef3637a95ec14	9	What is a valid synthesis of 4-azido-1-(3-(tert-bu
+04df6582aa80654405c35d00a14d419eabb3a7cc3b44391f840015d7132a29f9	112	We have a large ensemble of 10.000 (ten thousand) 
+307f8243de081dda8f7460f4236687ac4ff32c2ed8cd99f8d1d1c95f6d51fcdb	41	Your overhear two chemists talking to each other a
+a79ea09e9c70608a9a1f445cd9651fdc24f02df9f0f4a59bd79b2aeaa9a5e9ed	176	Researchers are attempting to detect the spectrosc
+9230e607c25a70ec76521de04d18c005e37fa1510206093a992bbac7e7898cbf	102	The specific properties of a certain organic subst
+db271ea4fec62dbdfb3c98ddbed0a91769047f49624258a906f1fa039cb1ae61	50	A light beam is propagating through a glass with i
+edc5f0c0772d1831537754e5ef09b5478cdfe98ca1c9e27330af01d5a48882ac	99	Astronomers are studying a system of three exoplan
+e0cef28ed330081177651ef212de2452ea62645b0ac57e2a439b263be756ed21	51	A particle of mass m moves in a 1D potential given
+49ba4f13ee018a3d97f592b223f1269bc489eda754e7cd8f9d38ede56a1036a4	72	Two stars are being studied. It has been observed 
+212b007758282a1ea85bec89d650ebae2cac72af8ee7da0f8843348681c1ddc7	54	A benzene ring has a carboxylic acid a carbaldehyd
+acf17d1c19067577340b54912119971e099ae57bf34346a1a7c0c8661f6c7454	103	A eukaryotic cell evolved a mechanism to turn macr
+41c80363f1c3b53389a8ced05ff6df1e73c3e5f4d0c4ca6253570c523aead793	41	Four identical spin-1/2 particles are placed in a 
+05b029b7d556ad078cb75271d693852d7ac59093d7396557f09364f221fd020a	11	Racemic 3-methylpent-1-ene is treated with Grubbs 
+bd79c3a6a0dc20cb9f69184054dbaa54c12f9099fb9869cf100a0da1b8565933	83	The SN2 reaction in organic chemistry involves a n
+05f95acbc539ec2d48f0dbf4b4ae341d8b2176abe11cbfd193af301c387e90db	47	Identify the compound C9H11NO2 using the given dat
+7ee807b8ebfccd93d9f4033a2c2123905ee522e4a9f1ee944deb19a226e70089	29	Grover iterator is a quantum gate that amplifies t
+1338cbfcb3cafe1c413df60ccba972ea2836dbc82a97d96d4ab48e4da24e0a08	43	cyclohexanone was treated with bromine, forming pr
+a65f8e4c4e10912f58d2f22c4c386a6163d8a660399530bb668d2b7ea7cb130a	34	If uncertainty in space of electron's location, wh
+672af18052bb5a2f16299704a51235116768416b42626bbd5132a72e601f63cf	158	A Ph.D. student conducts experimental work on the 
+41d24772322d6b15bd2865d458b50c1b5fc23d3f7e5938ef0eaf43fdf9aa9407	135	You would like to use PCR to amplify the following
+5f9274d3c8bd88effdb8d73234a04594761e14abc96989ea97f79dbbdb6c6e93	37	You are told that an interaction term in your nucl
+85c9b5146b5543544a6938d7f4206ec0ecc2141b5196f140ffc2feec2e3255bd	44	Activity of a material containing pure Caesium-137
+a18309f72cb0b512ba00922365d84a7ed688e40d08a60560591524e788fc3a32	83	Given a 60% w/v dibasic strong acid (MW : 120 g/mo
+a02b0d5e0863e5e8a093eb7993b9b6d86e49902fb622d9eeeac21a463465b6b5	63	Sigmatropic rearrangement is a class of pericyclic
+7dc5240974aebaadf100eaefefb71b0faa95f8874463e774c781991ed2ff8541	136	You are studying the patterns of inheritance betwe
+1925f6ff3097f4b3ffb6bdedfb0992daff1585847542a8c2a9a241d1052deaeb	65	Hi-C analysis based on 50M cells has revealed a hi
+47e3c694ccf28f17f729c0f6905700fc1927945403ae1cdea0b5566f90b4965a	89	Your colleague has devised a new quantum field the
+d77d5b298cee631df36026b6d153b35193ee7ec2ef957990530f94be1a26d1e2	50	In a Tn5-based Hi-C protocol performed by an exper
+581269b6bc3ffb8be5bbffb994475f02955dd97ad6a3d2aa8168c2f8ee39b13d	21	If a charge q is placed d distance away from the c
+35b96612503ebc0157374606fff0895e84830e0cf0b1f9800be63786189b5a12	81	methylcyclopentadiene (which exists as a fluxional
+b3f8fefd25e97ba0d21e6f92203086a820b839a8ea3bd45176c21b16c5f54b93	128	Astronomers are studying a star with a 1.5 solar r
+3ef5411ea1e2c444c21e622989215db806c7216dfa2ef88fa23ba11b04febeeb	76	You have prepared a di-substituted 6-membered arom
+c7b6c53d75f30bd5895c01d719cd0820dffaebb2c89f9ac74f742e2b7606ac18	11	Determine the starting material needed to synthesi
+ee8ee2a50e9814b9aa29aa16cd2cf2b5f03bc7cd4bb4f0eda9b35f4fc5ddc3fc	87	An atomic nucleus of mass M is at rest with rest-m
+5d4836f429b29abcef292e2980a8758cd5f70e0d63616d1ede0c7b182a96c81a	148	Which of the following sequences is correctly orde
+4e298c6e19b956fb5bccb4a932e24c05298f8df510858c9e87f5daa36b470213	17	Write down the major products for the following re
+d0111508d9bc8aca296d956aee39c4991856039f18ff4d301decd1e5ac0a640b	51	You have prepared an unknown organic compound. The
+586db82508ee8fff6766dba78229514b66e6dce62a41c6b90c0272155f5551d4	38	The |3,0,0\rangle state in the standard notation |
+0a0bf3e738e5eed6b3ebe695dfd164c9ae2e9bdff1d8d179a9f5bda90af9dd57	92	A scientist injected Cas9 messenger RNA, a guide R
+16c5a9c67daeb4ad65c2c9bc744ae422beec9605b3c7a74c0921031766bc66c1	13	Which of the following products is formed when 3-i
+6d41143576a55023c2befe3d3bf5619adde9b778d1eed251271ae96ac74e3c82	123	A particle can exist between an outer and an inner
+bdd29bf4a702b95accec2145e77c0fd683eafb0f4195eac753b285e0e5f7c3de	81	Consider an oscillating charge distribution, which
+68fe789e1ce42b2d49c8c3c64e9e41c1d04666c45e20dec44f845444633430d9	46	Given the measured phase shifts $\delta_o=90^o, \d
+e10fb063e5dd645c9519e6ee00c81214e16baa1172b74c494aa8044d36e58a3b	5	Which of the following physical theories never req
+41fafb9428e0cf2c894b87913d7847f54f43eeb5d5732b0d49aa0e713a4ba0f1	24	Determine the pH of the solution of 500 mL of 0.1 
+15f5158f1675cf82770785289ce1aeb6aa60dfaaf0fd61c2720dacf5060245fe	203	A Ph.D. student conducts experimental work on the 
+af55feecb31ad9860949d70a38121c756433802e4872526976dcafe4aee786d4	44	Suppose you have two point particles, each of the 
+8d7c7844b409cdeca2d1f9f270868e3c0160d0e38e9a12cf0d989e9ac3ea534e	23	Identify the missing reagents in the following rea
+4b394a356eeb6f0a4f4343a93d2d8d65e24de9451d727aa2b2a5c329c7dcdd4c	47	Two accessions of Arabidopsis thaliana have differ
+841e0f27b3c544aacf548f0b3aa21c1cb7743f0b02bcf3a59901eae5972c183b	118	Chemical compound A is formed by a metal and a non
+6b077c8d03ed50efcdb575b4069b07ec9312c983bb3262b37a8256344b5c7e3d	89	An intelligent civilization in the Large Magellani
+88c130a1109c4e2529fa7d494e40f9d225fe69adbd550ed241d8d38fb0a9581e	53	benzene is treated with HNO3 and H2SO4, forming pr
+3dae8c78183446b1750cfba72c15e21d60c809d363ee3df2287d360dbf9a9c65	8	Identify the correct sequence of reagents to synth
+cc753f2df1a97fb5941d1c379835f2c16f14b9fd28c749cc857988d69c6ffc0c	7	Which of the following four-body processes cannot 
+addab866a5ad439b7a9712b8e42eefb8c0bc59c0dc5b9a9deff9e51b2735fbde	65	Cas9 nuclease and the restriction enzyme EcoRI are
+9877623c4ad01e098ceb799e98ec6f9c237b1dd53db24669edc017e56c2ac85b	152	You have prepared an unknown alkane compound. You 
+029a1426524ba351fb8fbc6ceec741e37a36eb3a7874be4fe28307af3efa5304	80	Let there be a diatomic molecule, with elements X 
+9727ec6e9b27fc6f1c41d75595681fd975abb17a9b6111a48fd0a1803769e213	177	A group of physics students is wondering what can 
+60e58f2d94e1fe5a8a3b66421946e1d4946e942493bde61b40e0d59be5e5bf20	106	An equimolar mixture of salts A and B weighing 7.2
+53ba0ddcd264042c19fd4630e3bf97462b3d5575ae63fe1541bfdded575f6a33	42	By considering different factors like heat, acidic
+3a788ba341c4a85740cd3a56e960ae24f3ad8a4e00ccb62902f564bb05443566	134	The state of a system at time t is given by the co
+8be6ba6112581c7e632b7018d1d8e47260806bfd4f10955e79db9b0e024e42ac	19	Which of the following symmetries must be respecte
+b204968f1c99ff3630c32d173639e9ab43b9d1a2d83f1c2ecfc465ca51bbee0e	11	Complete the following reaction by considering all
+fb4d383fbf3a2a9fb4c03e6b697328533e95d1a578a06046e66c019820b166b5	99	Consider two electrons are in p orbital angular mo
+40d1400405d6d259f8be0cfdbb7ae4542ea814afe1ed1f687272d9a92d2c455a	80	You have been given the task of determining the ef
+8fd0497977ec55f55e686f4698d2514ca6b7dece35ed1eb119ce0535f8436106	128	We have a solution (at 25°C) containing Fe(III) an
+8f1923cb925bae7b068732f8f97934b408df8447cd5bd83f17d186c474635541	58	There is a spin 1/2 particle with magnetic moment 
+cf1a09c7e09828360bd0fd953db791cc242a1fd0fdca9d5ca6835376a4bc7bbe	19	For multi-Higgs-doublet models, do the Breit-Weign
+54307be190b21f5d3f4be51b65cce82b7816c52ce218fab78dba0f6b7f4aa41f	53	In the CERN Bubble Chamber a decay occurs, $X^{0}\
+4f636d4cd8293fd5d7f059ae78c9a9f946899f0ef654c7cb4c22e10cbac8e4e8	61	Consider a Fermi gas of N relativistic electrons, 
+36e8dbdb6e9aa61b67c8b7dc0d0f71e9d3a0ab4581c1e8cd3de7fef463013b57	34	Identify the final product D in the following seri
+b49181087410eadafadd132ff4f6c3ee7a61883aef5321ce689ccb8a7097a962	20	Arrange the following carbocations in decreasing o
+51ce498f3c4a64ea4a97afabad1dab0588b4cec14c4773e7a38d4cbbd8a5b01c	9	Which of these conditions is associated with an op
+2e3cf12e512f41506e0a396fce1a0dc6d2a9cc3174e67be151556f6fe2045f96	75	reaction of solid A with 8 equivalents of gas B fo
+1f6da8d98b68381ec27ec2ee3cd17320da71ab67a6974ad7ab52511432fe4e65	25	The Proca equation is given by  \partial_{\mu}F^{\
+828af9f1cf0740659370c0c81966c4182c870706e62d60c7568e9cbb63f13a36	49	The spectrum of star A, plotted as a function of e
+4077e4b4d89cf1b8703cb4a59a422cd4c32e039e9107a52219ef3517f1703d62	54	Astronomers are studying a system of five exoplane
+4511282ea9914ddbb24fdbc5b9fb74853ef56ec5ccd1cec1d302b06f91f4168a	86	A transiting planet candidate has been detected th
+f89b5959b895ef59420ca99108c56393b4dcf9e3c4b607c1c1558c9eea36760a	98	Astronomers are interested in the luminosities of 
+7a0349902c368740d4e335aceb3629a26c13201bdc72acf451b0c78cdd484fe6	35	Given the following Lagrangian  \mathcal{L}_{int}=
+8f74593d78bb2d6fad28a98444dbe8e4e774062c37f4fbdc0575a5ffbcec55fb	66	7-(tert-butoxy)bicyclo[2.2.1]hepta-2,5-diene is co
+986c4e226978ae4af45ab617d83c0ec37936ed9b64e541cdba354aa87991d925	81	The study of quantum mechanics deals with a lot of
+bacd38a3ca69ce96a2c732dd62b1d7542f0b010fa978f8e4e0c0dc0238afebc0	67	Consider two systems of binary black holes at dist
+681fd1377da8aaa181e1620327db7ec2e82f626dafdc53c1061a000fe48b5a48	38	Determine which set of states mentioned below are 
+87358de47e060bc97d431c489a9692587e0d7184885d407710dfcd5800772fac	38	Two astronauts of masses 2m and 3m travel at relat
+cff805d18b7c5e7237f8049770f3f5d99d82567743954b1d63f91600842e36a1	67	We want to observe a decay of a single atom (atomi
+b1afd8dcbd80e5075d90ed43b439ecb86a464e8132365ac6ee1d1d8b88c35e66	110	A spin-half particle is in a mixed ensemble. The s
+074c6d47846765419e2473888979b4c4b0df394181e4bfef86ffe61d9057c935	50	Hexa-1,5-diyene is coupled in the presence of cupr
+411ac363391049c3bdecc838d2bbf6f45629f6a4dc48482de6f0e6729c357e91	73	In a gas-tight vessel, a mixture of gases A, B and
+539758e7032712e525b784d52e9131bcaeaf76ef09a706ab111d37277609ef05	17	m-toluidine and hexane-2,4-dione are heated in the
+c4c8a380b25bf12c0074cfcb78977645f0b703f97ada7741660bd9285b3b7ad2	34	Consider this quantum state   $\left|\psi\right\ra
+03f4a080560b01b286defc9444e0dcf68256c28f2cc47df52c6078cfdfeea26e	32	A scientist tries to uncover a downstream pathway 
+e35253e852a9c32c9084234e931305f5a023179fe1ce7866e3f116e40c09bca3	81	An electron is at rest (not moving). A relativisti
+9c00cd86ce737f4ee271f39c48d60a58e96d6820c140206ecaf49dd576134393	185	You want to study the role of the GADD45G protein 
+46c7041102e3f16654964ab1384af81c35a583da188df333d7eb963f9ddff1a1	58	Quasar A with a bolometric flux of 10^-25 W/m^2 is
+2d09f6a330e0ee0ec534d54d4a7ae9d1f4db7d0ae7d8c098c388b3916ea329f7	87	You want to create a mouse embryonic chimera with 
+9a91440b53bb434177183ec933216f338e5c5c2b5165878658542ea96bb424c5	91	The state $|\psi (t)>$ of a system at time t is gi
+2f6615d3757f951b3562203ad9c52afec3c236880e5a75e25e28836bb5d623cc	90	The Cope rearrangement is a chemical reaction wher
+bc269c8b0ce7d54987f451374510300e4456c3078d0b3f284ccc27133a6bddb5	84	There is a C-NOT gate where the condition is that 
+205e392b16cc7b0886d6e4dd004f2a3ddec018d36d5188d0cb5896aa20f364ab	246	"Scientist aims to detect Severe acute respiratory
+a6423278922a671c63c34ac628888e31b69a3c0e7abf1bcb616ea0491338ad9b	44	Consider an isolated system of 13 identical partic
+0a5f20adb2fab1447990cbb81ec7f008d3af01b66eaf2a486973787e3272ee15	40	9-fluorenone and 2 equivalents of selectfluor were
+5aa34adbaf2c3f09e48fc773809fcbfa4424ffbc24b174f1457308dbb43c9747	127	A planet with a mass equivalent to that of two Ear
+4d12f6e6cc26196ec9090fdf42b33052e1f09c527033a00da7d28e22d7023981	98	Astronomers are currently observing a circumbinary
+08f8e62ddeeee1fa08a5018419aa705204c4a58d606f855e401bb675ccdb88e6	89	Performing observations at the La Silla Observator
+ccdadc9672d55272213ee5ea4626ce897d1cbae9dff1630679a9df6d0da00f7d	123	Imagine a point charge q is moving with a trajecto
+a50b567720ce740cbcdfa9f7baec217e50099c7ad80ac354c03d84401ea54d5e	128	Very large number of neutrinos produced by the Sun
+0b99efe36447f43e60f1e29243e2e22f2665baaa9b2158feb7945787e0a83757	113	In an experiment, compound X (C11H12O) was subject
+ecf40c97c6d8eb1af153adb63222b490d80b168189eb1f917be13391ab6d9a96	16	You come across an algorithm that gives the follow
+f96a4993d3e1054eaac6eb19e46f3660fd01b125bf39ae786f4ba7f5697c5455	14	Identify the correct sequence of reagents for the 
+8599abe05072ec111cf00dbda92153358b6dfc95b6e49a9afc91ec464c6a6237	141	Astronomers are searching for exoplanets around tw
+72d71882217136678c98c554db15fb922f52bcad4028ed7efd843ca44c2178f3	135	Patient X is diagnosed of moderate anemia and plac
+dab01216c6f96c353429a370685e712ade71d1665a46475f329f2b2f70e32255	68	The Mott-Gurney equation describes the dark curren
+fb443d7bb736becdc23c2d74281382ad36fac9c1782998aae58f3b51921c556b	60	methyl (E)-but-2-enoate is treated with quinuclidi
+1cd47ce3dce3d090669e6d340d8a4924e08628f3e86b069b30c3b1c7f237adda	105	Reactant A (C10H9ClO) shows a single negative peak
+249775754460416939dfca43a70c61b2bd1c01f456e38ce8686d4de83323f183	42	cyclooctatetraene was heated with maleic anhydride
+12aae51686818aa1fcc5e0861e89f6e147f3d903c7c14052137e2d2408ada737	43	We dilute 20.00 cm3 0.05 M acetic acid with 20.00 
+dfa2d01cf1b027c8e9a1a288debbaf90e0be6a7e17d784d4f4f04d17d0096acd	49	A researcher observes at his laboratory that a muo
+a2e5f41acc01b2f88960d9e7aac3da83fe002b98f3ad1469dfbd0c9d8d7181b1	63	You have prepared a di-substituted 6-membered arom
+666a355070094b2c520087e47c762109aab756860ae9c8f6ca536d6f91399405	51	The potential vector \vec{A} created by the magnet
+c8c7e5c323fe75dab91e5601c34c21257001a97dbf2aa3757fe65b44956a8fce	21	What is the index of hydrogen deficiency of the pr
+646a538a91ed634ab6aa2dd2abaa2d9b1e8d74dab11155f0c32066c99a92117d	36	While solving higher dimensional heat equations su
+ba5f0549ed127e6026a748c68bc37fb359bfa36f0b64ce1407673c9cbe5f3daa	145	Two planets have been detected orbiting a star usi
+6fcf9e576d3d027a4b1cc03f2d2bef022b26a7dc5fe8eca638cc790fe27cbd94	42	A chemist performed two reactions by taking two un
+7315f05d763b09094584626f5872a946700c9c779235537b85fde8850b89bd09	19	Which sequence of reactions from the following opt
+2d314d11435b76ee22f8d2bcabe0eb3f6a046d10a536546876b240945511c5e8	73	Let a pendulum consist of an object hanging from a
+745e5a323ca4351db7a1563bf76325e9c8f08c6c48d0ba0be82675500206e4bc	61	Which one of the following is a correct expression
+4db3c54eb4ad5dd349fedc574bd89ad037dd0aad420a4d8f7f596547feb94861	83	Consider we have 4 particles produced each 1e-5` i
+4057459b9205395720da64da5f0b099e696bd67b3eb0fc74396b013a1c528b54	41	You have prepared a di-substituted 6-membered arom
+74fada70a55ea56f051c271910b7c476598a87999856eb3cec796c22cba17160	60	On sequencing the genome of a new fungal species, 
+7cbd22ddff6891ed7a905a534ee87f90c9a5d05097c0a64c231fbc9208c96273	72	You tag the inner capsid proteins of rotavirus wit
+642bc074451572d369af78c655fb45403d8be859c92505f211bfd7dd5f75b32f	96	1,3-dibromoadamantane is heated to 240C with an ex
+50269e851a685d17cd7fcd7a723b29baa768e8591856fe9ea0bfc2fd4d1740bd	68	The state $\psi$ of a system is given in terms of 
+f56407168fa69fde3e6e95e0ac2f8045fa19fffc87151ba75d9f846e07a3bdb1	66	Stars in our galaxy have different compositions. W
+96ce5a765cf83bb450efd32a06dcbc4d232d6220f14e372a63b571ecef62cc78	24	Identify the starting material X in the following 
+76ed98893e2bd142ab911b839bfc6b2b25f230d006e293468103c619df61b38b	23	Determine the product obtained when 3,4-dimethylhe
+9f85e2ed5dc00597f0d0ee58e4c09f918ce984549f5585ed122c2af73eafc9db	33	cyclohexanone is treated with LDA at low temperatu
+de432356d34b2398cadb88b14207fd81e98c98d0be1f5ab964936226952ad0fa	91	A meta-substituted benzoic acid reacts with a mild
+6d542700bec85f17c9a7e8229b041ad82b81472dcc6e3c740904a4290aae990e	51	Calculate the enthalpy of formation of (CH3)2C=CH-
+f6053e700b9548feba34ff3e574f987bdc7fc8f84f0eedeb8b4776be21c8fb72	153	"Scientist aims to run quantitative polymerase cha
+92e334e82273189bd55b81167c8f45aabd1495c84398cce223eeb764f1995127	124	"Microbiologist inoculated a lawn culture of Klebs
+884a90422bb1f90a36688fa7a404f334350aa2a9713fed4e6d175f7e598dd9cb	35	Potassium Hydrogen Tartrate is quite insoluble in 
+c76843309945a1fdb1a1a560fe6fcdf54dd6c818cbcb2444eff8f3c659961ef9	15	Identify the starting material(s) required to synt
+7c13fda72dc820ecba476fb2f4c575ac85cd453b4a6173f1a634c4dfbf42f4c9	60	3,3,6-trimethylhepta-1,5-dien-4-one is treated wit
+89e008fd3d7ed6a160aeccdd747be6075808e6a8a2bad0d2c694e3d546bcd1e1	38	The angular size of the event horizon of a superma
+460438b0d9cce1cf9bcf30853e5f4c96985a47f478420154744e51d1fa6d61b5	81	A research chemist specializing in organic chemist
+5e0d8246e2021bf269adc511546cba7eb290a7cb596aa5fe7100667e783b7adf	104	In gametogenesis, the germline undergoes two cycle
+af2e7680e651f4c2d7a6a1880814565032d88a1082b1c4644eef5f3c64407d8b	16	Identify the starting material, A, in the followin
+5046a1346c4ee98d8a5df16da7d0e49643af0697ec281100f4540857cc8102c7	38	Consider a system with Hamiltonian operator $H = \
+e7dbe68cd2a3621a4df2f6f309b8ccc1546389bd1f39801de0aad2a5136bd6d4	113	You have prepared an unknown compound. To identify
+898b205fcc4c825da5a4a509421a91caab1f44186aa87c0adf0e31acc912b1ee	89	Compound A (C3H6) undergoes bromination in the pre
+36fb100448e6b20f934a2eaba0fdcf09a57dcf71a052ef22c0eac8a3f8f6d078	13	Identify the possible product when (1S,4R)-2-vinyl
+afdca45295a853722ef514de85dfc8f7bba313c0d634e09122ed1fbf7e4bc07b	14	Propionaldehyde and butyraldehyde were heated in t
+72218f71c205acc7a8c0006b47edb6e23559d65f3e6357f6cca29e784ac926ca	56	In order to calculate the necessary beam to produc
+0a01198835d636d3f4ee6cc7c77b8ac07ae2714a43a3ae9855fa77d315f229ad	159	Read the following passage on Wnt3a signaling path
+abfdfeccdd6d9452842e74874269f47609064a17cc767b9b6d71bba7abca21ff	36	Identify the theoretical 1H-NMR data for the final
+f8de8fea2c0182183e183a26dfcc718bf42ee7b18b626c743604cb79daaa405e	123	You decided to do radioisotopic labeling for your 
+a6495f09a27d041defe2ea461685ef40b3677ee75549ec2fc1ca0cec0830615e	37	Identify the final product, H, in the following se
+15d0f7cca8e62bec3304ba35d0515666f96a5a43d6739e3fb88cccf9abe82291	38	A student performed an acid-catalyzed reaction of 
+82a5e6decd8a9e2f0ab71b8824b7037a35b591eff034c434f0f60624ff1c5c32	140	How many of the stars listed below would be detect
+ace4640aba0eff1afe7adc27ea2c4f9ad12a757c4fb4585cab5976179d0be298	230	You identified a new ligand-receptor pair initiall
+86e84d5acb19c81744848a9b8a99442b352dae3cb55f5b7bf9420b4dc9ffd117	104	In an experiment, a group of students heated 10 g 
+ab6e6b8834207c593bb82ccad406777c5710f6e6205e7d958e65d1752da3e2c1	20	Which sequence of reactions from the following opt
+cecad405a077d5fcc392a2dc4efb238692e7f4ae879dcc998d83976c062cbe93	97	Diamond and graphite are present in the same magma
+e1dfd26cf84d7cc7c343125bdb05006133ca858c9466df022edd35d7417175e2	79	Anthracene and dimethyl acetylenedicarboxylate wer
+bff6512890809473816f3fe4a4496b4b7aea6df8771f759961be2f1d5f891603	132	Suppose AGNs emitted all their energy output in th
+0d4499ff3986cf4fd7f925056f1d314179c3783d66a8e02c7246f6d5e210b22d	5	Which of these statements about DNA methylation in
+dd9d060cefc1b3d67979af5e78c9d051b30c3b673ddb0c84568d76bff5c8f2ad	105	Astronomers are searching for exoplanets around tw
+72ef1aa04856bf16aad70d29d620cec47f490b9d3386e5a8110258237d598432	59	While studying a yeast protein X, a molecular biol
+546dd36ad09f2b8ce4cea2abd751518d856d3bde592ecea001b1e15eff8ef0f6	11	Which of the SM gauge groups can be approximated b
+aaeed253f89ed9349b42902c35c5675a72149cf17153ee39db3d6565e46d5142	65	You have created a therapeutic mRNA molecule that 
+9d226ad0b9ef75635226b7cfabc47479d969cb93aaac84392172cc2d95cd8f64	52	Using the molecular formula and 1H NMR data of com
+88f817895e8accbac2bde3a44dc57274b4984c19dc32857d60a512f6c0c0f728	114	Astronomers are currently observing a star with a 
+4b4ed483033c9b896d1e4262331eaa1732189bcd35b29ca7254524640c8c7ed7	71	The reaction between cyclohexanone and piperidine 
+0dc8cf20870688351ff32ee1b1091af53bc1db8a42c9487f304ffc01e248deae	42	A collimated beam emerges from an analyzing spectr
+71606f75fa15de2b3125c7270b3f3c2161fb13f6a7fc91287af3087cd59dc3a1	63	Imagine a situation where a novel natural molecule
+d8d8ac266789ae16d924fec1634753ff7d4c8009c324907dd108e901d4f82024	25	Consider a rhombohedral crystal, with the interato
+8cc680e1b1b897adef128c7da3d50e222d148629dc0c56d45f3005f45cb21402	39	Some plants lack chlorophyll as they have evolved 
+0c7cdc4bfa7420fe84ca46b5beef847c15db3368ad83b4161904d6d7b31812d5	23	7-(3-bromopropyl)bicyclo[3.2.0]heptan-6-one is hea
+7b9f0a44edf65879598302ef99f913b8bb3f42b34823a91740103ed60eda4e1d	17	Protein Kinase C (PKC) activation plays a critical
+2e5716576a54a09d1fa26975c39345a8314e7099477755d74e9d58ead30527c2	188	Which of the following stars rotates the fastest w
+2bc57202e1d9212201a5ff8e5d74333abfbf2bcc16dbe8c5c7e19a96d70e451b	7	Which of the following (effective) particles is no
+1e333e10a8463df8d27f3cf78f7089c07478b5d019b18100bd77912890bd61b1	116	Which of the following stars or stellar systems wi
+90a43995b05d12c1031b4e92c18eb6e1273d4843ccd77c99c2e67bb9db13d950	75	Microgravity during space flights is an unusual st
+e24614d0fca3b759958836ababfffc0807164673d15a843ad3a658d2bcec824c	48	For a magnetic field \vec{B}, parallel to Oz, with
+38e7e5cf69fb43663f3d0f1b36a18a1f370adbde3eadda9612b178c62e6cf148	119	Consider a bound system of two nucleons (NN) in a 
+4ca38b9a0dbff7eff3fbfec55210df4989b5b5dc4bf26c7f3d22f717becd49fc	252	Which of the following stars can be detected with 
+62c11e83fb81191c7337bbb504a255e8bb6e793b969bc6af133394fb61914683	64	Consider a two-level system (transition frequency 
+bb69dc7c7e540823215a1df025882131f94b45af2a6269568ada201325d53785	156	Non-relativistic particles of mass m1, coming from
+0d29d0ff5bb68d19691f0afbf420f43427e27d353b0181f3964d3c6a7c0ffaf0	34	Complete the following reactions and select the ma
+576710c11fcd11d038671fa21a7ee9cc17095f633d7448e6ff9af1224ebdf76f	74	Let |alpha> be the state describing an electron, s
+2e5922122b5ff2491eda3b12e0122469d9fd996e3cd994f444e5eebf858f889c	81	You have prepared an unknown compound. To identify
+f745d1008b0c11d6086a4bb58e7cfe053b8c67a84120a8c0e195e453e84a67cb	35	Three planets are orbiting the same star, each wit
+dfaf95faeb703a036e5f4d8734ff6ab47349251f31c9f0c17d0c6c2a02397a1b	37	Satellites in low Earth orbit have detect thousand
+bc3a02937b61f373c1b15d813ec8abfa147f95f610a8d585faf4680c1b409dc8	44	What is the amount of non-Gaussianity(nG) for a 2-
+01431b8dc7d2f0ddcc928cd2f6525f5cf907a0989e3f607626f3864514b2ee44	70	"Scientist aims to detect two genes using multiple
+7ccd0ea52979fd032b937b0bf6e1a8a4768ddd19b431059486ed742434b8dca8	28	The chromatin is packaged inside the nucleus in we
+7fbbe9392bf071d60389ea65eb08956a618a5bcfb8c8414a6effa015bc0266a2	98	You are reading something that appears to be in a 
+77594c8bb535c7a4407f1b7645788bbc6bd2f606b701797476e0ec98558997cb	66	Suppose we have a quantum operation E(\rho). It is
+443c6fc0b0b4adbf811ad5c6e4ff43e8f977feb7c6f67f74ff4ce266506c5591	42	The procedure of the development of therapeutic dr
+c0e1ad8f359e76dfe2e3f4df0288704315b8178a88ae556c3133b7a08c9dd128	61	Consider an electron fixed at the origin, and a ma
+a7470d0599ef0b72685619b4f35d515f27a97218c1544ca259e8cd8ce8bf710b	24	Select the suitable reagents for the following men
+dbdf229b3b650b5ca0555473ecf4a9d02092c4c3a0ef98f67bd430d60eaab8b3	82	An electron is moving along the horizontal axis fr
+02aadb904f6861b18208e0bd5cee0748ff8740de9584cf1d263fef4575c7633d	115	The reaction of an electron pair donor, nucleophil
+ff36bd5420dcfa8e1d4d09d0f0df2064f196f9750da1e341f82eb7fc095f9c15	44	We dissolve stochiometric AgCl in an ammonia solut
+9673c7cde05176513ea14d71fe1903e90c1f58100988fd3342cf08411cbdcd5b	61	Compound A shows two signals in the proton NMR, a 
+cb773b7a946a6a487eab3d942afd6d6b1df4cbdbb05e618664d20d5e23efbddc	174	You want to quantify the upregulation of a transcr
+074f9c0104d208e411df4a68f8917bba9275fe66215c6448c957e9662738c873	79	A scientist wants to test the effect of a mutation
+931664bc4613e74576ec20d5f7d632ae44c6bdf32567205461ceaa034aa822ba	76	Compounds that have the same molecular formula but
+319617cce10d5a408a8ba728039e10cd3d757dccc8edc3c070f6bd52657d2d9c	9	Which of the following observed effects does not p
+0053af0a09e53a1a97c035723731301ced3baa6e583dcb5b52262b61c49284c7	9	What is the major outcome of the reaction between 
+a2ae339c946785b758753bc569b1255878b6b9a47a60665862a3e3ad57ff4c3c	24	Identify product D in the following series of reac
+dac56c70e907c2c3a9a07018bd81931959bd298bf438778e15ea95756a1458ee	42	Three spins S1, S2 and S3 in an isolated two-dimen
+6e32a15ac3016f654a5b63b14473ab0d6a0a169289c121d8756184b403edd563	72	3-(hydroxymethyl)-5-(prop-1-en-2-yl)cyclohexan-1-o
+b005b362e39094d145439a00fe1e5c0f499e10275cf3852aced0d9516b3ca25e	20	Let us assume stars are uniformly distributed in t
+a51a9b49e08b523361ea544a2efca0e34a51cdeb8093c2313153d9489d83be52	51	A photon h\nu propagates in the Oz direction of th
+c62688099077de2e64c341a8a9a896473ba6d34cd450acca8198ded1911d1a29	55	When saturated epoxides are reacted with organocup
+b6fa66ac23d95081f9ad8409d9204a720edec4428f3707c48413fc03ec532bf7	187	"Microbiologist applied a mixture of saline, Tris-
+8dc657d1fce0a7faeae64eeb46c84643aafd55def25c2a42874c951d9dbaf14a	63	Astronomers are studying a star with a Teff of app
+bb9b6e9634e89d809f05009a9b2f0adf2fa502a86085e35b7aff604984fa6543	75	Imagine a radioactive nuclei X(Z,A) can decay into
+21925da07e4bee82d2ee3d7944a75f63242bab3bfa40854eef9d51f27fa17a27	15	Select the major products for the following reacti
+e969a8151971b5f42dd6e3126d08b466ca5cb5ae46a339ad73673e7e90225ab5	89	Consider a system of 3 spin 1/2 particles with a H
+cb0112922b4100a81e267d8f2757e8ea6adfab2e8ecd01fb88019f3a1c3239d0	88	acetic acid is treated with bromine, pyridine, and
+b6b56d419b22b0a10c32ff89fb5fe0d49a72027595676d3c7a6d1ac13ce3236f	50	A spaceship travelling with speed 0.5c along x-axi
+fe6ac1acac94eec466cc796cc81137f9dbba4c14793238ca2b429f2af25c6f49	30	Given a reaction starting with 4,5-dimethylcyclohe
+9d7249fbc9f9c637fbc4d3ab4865443d0f5c517223b1b42ee11f0ab944c0cc30	90	"Scientist aim to detect plasmid-mediated quinolon
+ec8cb74685a1606f4a81342d330bbd525c560873e2ee961c5c71e0b233f3706b	75	methyllithium is slowly added to a solution of dic
+bc62ea0d9f83696d97372e5666dea5e4dc8e231620dfd92c7d863774bc95bd72	23	During the development of a multicellular organism
+93a7da7f8d85ce5c11326270488afb28f2c10c4560c8ae28eb2d72b671287bcd	92	Consider a finite well potential of potential defi
+088f64c56da78c674a7d27e9914f139603f2af62ca0b99133d1b9774e53f49cd	42	A system whose wave function in a quantum harmonic
+64dacd6df4baeb3d0f68ef7e7ed97ce5eb2664fa8776ec146cb9b75e8fefb4a4	436	A researcher is investigating the role of the PI3K
+62a08bccde9bd184a4c1e7f7bdd3d20362b49ee5b53b41f10c650ab0fa998a39	28	There are a set of RNAs of approximately 200 or mo
+52423f4ad56294ee14a66993ef0ee9c9b0f1047dc76b6dc6c19ce412ba61e34b	85	A supernova occurred in our Galaxy. Part of the su
+c2d124ebf20ebcfee28c86fcd3a89d14c377b9a0ef8068be0e4b649891ec2c47	16	Select suitable intermediates for the following re
+56fa8aa52de777767dacbe19f20f05c6613bced1f2b347d19dc33a28613b1896	64	A spherical shell with a radius R has an electric 
+3bbe60ac822544e55a746ccd0d3c086b4e7699d801b90a1f6b9165af89f33ede	64	Particles are collided at the center of a spherica
+b6509e2af3eb38533ddf4dcd541f0b7f10fdbd62abd9d19309afd96106c7df97	80	Consider a quantum mechanical system containing a 
+7abc88a0e707e6468867748ab3e6a90881ef455c559be45faa611b77a2c5d11f	77	In the course of some peptide chemistry, you treat
+f40af275b2d2735fda58dc187dfb2b5fb0114f6e66a888674ba9df43231f05a2	82	An organic chemist performs two reactions. Reactio
+0641a18e3972d1ed4218d80da9f1ffd2d3a215a9ec1eadc33c046fe58edc52dc	59	A sheet made of electrically bonded metallic layer
+2f5ae95b3f71cba896b28af258f8e9e3f480e53efdd2d76c920fa33b3ff1a579	8	Which of the following molecules is formed when 5-
+6e30dc43d9ca7339847ccaf3c9a7e38a1b3e069546beabe0a61bc1bb9261fe79	70	Congratulations, you just landed your dream job at
+38c8288e41a28d78d5e1dbf97984cb30136c2f82b59b85127006994763bd7d8a	132	A group of astronomers is using multiwavelength an
+3335739ed777efcf7fa487abe933e1d32e0cc24c02f8096a17029c389de79291	94	Identify compound E in the following reaction sche
+1f13d8fdf9189eb288ad1d702183a8a8add4a74ec8d8eb1dc2933bb51eb80c53	34	Large clouds of neutral hydrogen in deep space abs
+973c06ac7694724445db9ff1bfa024637a7b5b5be8c3d2ff7b62437bc8ee3940	109	Which of the following sequences is correctly orde
+a8ca274914b1ded75c7b036fd6946b979cfd45d6b9ebb4b49ba60326395311e2	120	A dicarboxylic acid containing a cis-alkene was de
+7fc73af5f7fb9de41797e325973826d8d02e06165239adc2ccab2cff399abca5	74	During a quantum communication task of a quantum d
+35e82f276be0fc45729eaf6a309e864947abd44b989ea5ef083587aebc92b3b6	176	A chemist is synthesizing an RNA nucleoside phosho
+c628067d590b6628ebea2a2afdbf5d89fe0c2040c20b790037d66bcb88dd737d	26	The bromination of alkenes is a stereospecific rea
+116acd4f1e180f7aedf56a5a3b302ed2f0701940454192c4d361856844323e32	106	Imagine an uncharged spherical conductor of radius
+a0d9b5cbae0c26c77db0df976c35355b4958b000aad0c5ab195d4843f3b2ed72	78	The 1H NMR spectrum of a solution containing a 1:1
+37c72f0673fdac38bcfa26969576a3b375d78de48b5b10b9a97cd7d4e3290f2e	60	We have a solution which has the volume of 200.00 
+87f58704a8185c1240e2bd3b3876c037fd8b8e5c21df6ee8f3aa19d04e821e80	66	The oxidation state of a carbon atom in an organic
+98e0fe02f3dc6d24761607f0e145c2fd86df3d438699db1873ec325862f74d6a	69	A gene encoding a pigment was introduced into Cand
+c60dfcb52974fdd37c9d20873399a97515a8362b251399beae82692dcc5b2f8e	27	Identify the starting material (A) and the final p
+e4993d3d1e8843dd53921937fdda1ef379c27b9704401a8c3e6444cf09068b1d	59	A scientist studies the evolution of four closely 
+7af0ff51f384dd166fd6b85634e32b0a7adc48255651da0e4622ccd6b02ee6c1	23	Consider a quantum field which extends into a clos
+59ce1dcfc958848b0886c1971300f8f04910361c41d7e715a99b111b406ee37e	34	Parallax of a star is measured to be 2 milliarcsec
+28d7bec25c00ae088ef1648bc0f35578e0fdf0bb34d4aea57e7310f0643ebf0f	22	Calculate the enthalpy of neutralization when 500 
+cce1d67ef6a99d6f2473f705d5a4ed35a929f36337703142f045fc2be90144be	61	The Interaction between the bosonic field X and fe
+67d5dfb4db167fbe2da49941e3fd3c32509f672db24e2a3fc57de6f5a90cf855	81	A vector field f(r) falls off radially as 1/r^2 fr
+e59f556262ad156a18b5dcd0675f86893869ea2204bc2caf2c211ec261a5ce3a	77	A synchrocyclotron is a special type of cyclotron.
+50e06666dda15dd96c202e498691a5027b7d5507dfad0fdff950abcd081c2e1e	69	A chemical reaction for the synthesis of a product
+43ff637f44b8a0ddf56e98d4c7a63d471082a0e5d1ac3af0889f4a001ce655e7	91	You have prepared an unknown unsaturated compound.
+de456ae4fb5b75616ddcd807f8f4b97cee3d3320bb85bc009886fee18ff5c482	48	An astronomer wants to study the profile of the H_
+5a2bafdd2e8c18b9d957083422379e2e1bb00ef08b5a8b9931954689c4f48fd0	9	Which one of the following is the least correct st
+ee6c25693a55c5d5862f50db184640b7e063306010d21a7ecf04cb5cf2e32079	25	Which of the following compounds has the molecular
+09577460dcbd8ffc8bfeec9af9270e4f076c55cb82259656b09ca7c58041af7b	67	"The alkene metathesis is a reaction promoted by a
+5ba4405241193435f7b1109d0fb5bed528dbcb2fd2b1c86ccddc7464624744a9	21	allyl 3-oxobutanoate is heated at high temperature
+c973b4653fe29744a9d9ea9d4c663e674ec0dd5838b731eade3d5a189786e67c	46	Two compounds A and B are treated separately with 
+169ac26aa72d26ea17cd86f99bbef6a2dbe9b48a0aa1cac8879e247fa33fd8ae	77	"Scientist inoculated Escherichia coli into Luria 
+ef582ed28e71928853d6447e7e73c9dbb75da1dc8e0142349a339d238fd123cb	46	A particle is placed in a infinite, one-dimensiona
+317d1f62b465a22c060ebf7a23c134a9f076a1da152ba42f8370980c4690c5cd	125	Substance X, known for incorporating a heavier iso
+b64adb1ba7db1724a1b49a9e6c9d71a342b58e0e8bc8ae05b228ed1c0d4cb29b	15	1-bromobenzene-2-d is treated with NaNH2 in conden
+e60a2415b3b2055d527c7548c22ecf26ec5f7a18ace864b311484b365ad89012	78	Consider a one-dimensional spin chain, in which an
+91cd8ef57120f52fa9d5444fa96312f44a57c35ba57fc4dc7978197bf527419f	28	Consider this density matrix  $\rho=\frac{1}{2}\le
+184eaf9a7c2104b75587f2a3c20235fc13056111922ba419d030ab0e8d659ab1	84	The Pinacol-Pinacolone rearrangement is a chemical
+42d8d4d5810604a638a87d82d79c66e4ce5f9e2cacf26bc2e1da7e2d711cbec4	27	If a sperm from species A is injected into an egg 
+1a7139bbd5061cccbb677403a58617aad3c5d29d3935beb9a15b6922eb8dfb40	106	The upper limit of the variance of any parameter \
+935c17850a4ac1527c51b40ce0acd28dfad0e3ef59fddcbfd3e7ed898dfa09bc	69	A team of exoplanet hunters employed a combination
+f477f9081feefb626548fcb0b3d315827c0137145d07d91502d032b7ae55a810	93	You have prepared an unknown product with the chem
+842ad212aa3d1781a4f46b4608ece50d3041506a8282ee25ab16757476de56dd	34	Plants growing at coasts of oceans and other water
+81f7b930281eb5dff79a855ba325c49c56531673cf921aee3f1100217a2138e0	111	A 35-year-old woman presents with a painless lump 
+af212e3c5e73aa13d45da1ddfa3a014759ad9ef9ef6f4f49bea82d24b93155ce	25	X is a meson resonance. What is the mean decay dis
+686a9db0a644c7f3959de0cecfaa08def2200f2c80358ef57d997f345f22041e	12	How many stereoisomers are there for the compound 
+7c42f6c34c994206d14049197953ea2dabd6160c315c2d3fdcdb673bd8f6a160	74	consider the following four compounds: 1: 5,6-dihy
+99f5e84bf3d1705e5f9836a424f15212f23fbd9c8832b88f6dcc2acab12ab031	8	5-fluorocyclopenta-1,3-diene is reacted with malei
+03c9404dcce148cbd3b7bff97823d803f8abf69dd2a60c32b4bc36b91fd50db3	101	You identified several new antigens in a refractor
+7889163c8acd11569b757cf023d05ab6f7e507562f4295db878da97d2e8101ca	12	Which one of the following in NOT a constraint for
+c1dc6029be1c2b80c22fc968bbdfcfc2b179437b26b1902dac5e7f814120429d	20	Consider this annihilation process  $p+\bar{p}\rig
+8334112c76c53484af8bf2ad5f9c62ff1b0034f2214207c4ed018a5f3422127c	85	Five binary compounds of fluorine with element Y a
+8a6868ced22d7cd0f93d603d0a4aea15b987c89a73cfe2765a885e1691761a1d	56	Two compounds, N-ethyl-N,2,2-trimethylbutanamide, 
+36c053dc2faf95f2fea071650de9479430a1ccfda2ec5099f9c68f06a631f2b7	112	You are analyzing a small peptidic compound that h
+f735f5e54b434559893dfcbce0ab290ea30c39c281603021ce99380e0df807b7	106	Among the following stars, which one will appear r
+d7ae7bb7b85e151985e16e080b5847824d2f86044140eb4ce2eaa61d672acfd9	49	A compound with the molecular formula C8H9NO and t
+3fa7618f0243505cf7a9a078fc7a3af5f9bf64fd8f0cd70d317188946071d2ae	74	The state of a system at time t is given by the co
+4f6af085e7c429288f0dbfc21de12f2e89d2e87b15623e953b84311b6e741fcd	74	You identified a new quorum-sensing peptide in the
+5f2e2c8f23d4283024fc97d855617f8b2dd33cee9a1293ed2adafb9e1e58cdb8	74	In the vacuum, we have the following mixture  $\le
+1c9bde7268b351a9f6ad31035184e8a833faccad6e72a47b31acf18a125f3253	36	In a specific region of the sky, astronomers have 
+8f6b4deba37f62c0ed6bd98a0fd11d263b18b87c5af83548002281145dc2345d	42	Consider a system of three spins S1, S2 and S3. Ea
+ff0911e7d4fc397b54e9ce923c9c0ee14a681ef81afb5a9540e647d57a18c44d	48	2-(2-oxopropoxy)acetaldehyde, when treated with me
+68e0838d5f3783f2936ed3da8504ddd764b29061a6af8a4b56090108ff241c7b	44	A signal transduction network in living cells ampl
+a58493c026d5a66490f1c3a74e1feec35c2f2bef9ae01439a3a96c7f127a5351	12	Which one of the following methods/or/observations
+2b25bf5caf127b0326033d4fa491a1c7aa6f4e3a1139689cec7a38c8b71627d6	109	α-β unsaturated carbonyls have a much more electro
+04a4b9cdf5f2f36bf330b18a6aba4f13830e35d1597e96651cd46d02bc936def	37	The diameter of the planet Tatooine is 10465 km. I
+d3d1a812253c6820810a45f0bdb459e234a5cf24a21eab59acfc6f30d8d52a3b	105	While studying a population of wild-type Helianthu
+6137d84e2058af899d366bc3de39cb1692b33fab6278599ce437655c07ff05ef	79	In the lab, a chemist discovers an unnamed bottle 
+f531179bc46d5453bcf5625d6ee3aeb7351c8a28e6dcca561acffe85908cb04b	184	Imagine an operator $\vec{P}$ of a system have com
+4e833b274bcc212c632045e24df1ff28f74349cb157da619a870ac39231cf2ef	81	Arrange the nucleophiles (1. 4-methylcyclohexan-1-
+c76ee2faa2d375e00d798d096e06c311d474624c299c939400241f7059420cbb	204	Since the end of the 20th century, hundreds of pat
+cabc6d3482cb1491f35c4c8ef5c93f18c137553099469706324aa2f8d5fc9f30	54	You study an Archaea living in extreme environment
+83a4da271aa8df17c0504600cc5b489a259ff87f3e38a9a14cf0429bdfc71689	83	A chemist performs two reactions:  Reaction 1: (E)
+03ea51c00b2adbe54e170f492180e8a50bb09d992fbd326ea669ec9a96a9dfe7	30	There has been an outbreak of an viral infectious 
+cb1692b49d7c1cd01ecc746b17b1b9b99615e6db4abb49c54b465e0605d2e571	94	Astronomers are observing a planet with a radius o
+401ecf922b6f2aa90f64cbdf5473af9435c3369bfeb7f481d630480ed30a4bd1	28	 Consider a 1-dimensional relativistic harmonic os
+25691d8abe7fb4710d91117bc6569e4f44e85e00027172c8de37fe8ac44ea47e	64	Compound X, which has the following IR and NMR dat
+eb12d9dc3eaa546936234962b0f994b3a1dab994029d024c61e750ec5b163b3e	79	In an inactive state, a transcription factor subun
+679e49acea70a6aa958a93db08daf4d6b7f869933e444c2cc3d1fbc389025211	96	Observations of a quasar across the electromagneti
+58a59489764c70561407fae83ae6ab07fb9bc0cfe3196ffdc26f5fdb5230292b	73	Consider an aperture, which shapes like a N-sided 
+2e7ad5910490fcda329fd7cc79dbaaf0569b16293b04824f19e4097b5ae7eb1d	61	We have a solution containing Co(II) ions and thio
+0656b9aa071df5db200628ef025d98b6ddaa9a5c695d7100277528a01d618323	139	Planet X orbits a star (X) in a circular orbit, an
+480b79fa47bd64a1403d820873e1d47a76c0436bda8583013fa32aec8264e8ab	148	While designing a high-resolution transmission ele
+4ad12e920ebf2dbe683d3b57946fa1f27a4739f90718656608fa673299bf3b40	229	In 2270, NASA undertakes advanced research to expl
+0babcbdee418b59537d4dd8d883ce6eacae9a68c30c7cbec3e328d223de2378d	127	Gases A and B are binary compounds consisting of t
+d950aa9728b39200f988a3c6f5759e001a6c0fab5274620c3f54620e5c77d504	66	Vortex-like elementary excitations in superfluid h
+f25dc8921b10d606841ea85960a9599e6b5e06a23740d27e51264630efccde41	27	An electroactive aromatic secondary amine was boc-
+eaf25d6531d7993652195c89b646cdafd0d88fb288a1a3ed5d19aea831018662	31	You have transformed E. coli cells with pUC18 (pUC
+1ce43ea24ed33ba266c9499f34c5b7c3674aaa9fdc0186563473aa952a3914f7	54	The medium of thin layer chromatography plates are
+a253cc8ab86d7a1eab6a4275a7b52c34c6c9f64f9cf9277ae776742ac1a95c5b	14	What is the pH value of an aqueous solution contai
+684280ad78e0a6358e9c8c3eef48b079e243f9d0320f16b900b767e1eeac2daa	22	Determined the product obtained when prop-1-en-2-y
+bc711b4797e2b4fee2515df80c7ed3cdb77c972b20d37207f0ea435d3d281568	109	Let's define the critical distance for a significa
+840648aedc20af448c23c9128897a2a7268d095baa37b6478304457d9c1af7da	24	1,3-butadiene will have a shorter wavelength UV ab
+5903ed2ad1ce2c56cc60e9173c913ea20ba4b1ec740cbd8374a3717d6f3c437e	262	When a solution of barium chloride is added to a s
+408adae946991f00e7bf3d57c1df3c9fe3c01b71332d95e24a6147c81e6fc595	6	How many components of a Dirac neutrino are a part
+7bebb7519d736d427c5b6f0d7be0eb96de4da873cfb95aa1a0133e4ff1131bca	54	Consider the following matrices.  W = (1/2, i/4; -
+7391aac218f284e921a18899b00526582ce6d6ae54a2ad3a5264eb044ac897fb	56	What is the expectation value of the momentum squa
+1b0a3b814d0983ee50c21318bb51a07653397fd3f6c5fb006e2b8672b3b6005a	31	What would be the frequency of the photon due to t
+80fdcf612776c3f8c4dd802e7973e5ff98e33a10db2bb8d38428b5b95e5973c2	58	A paper you are reading about neutrinoless double-
+e5a98979d0ca441d157bfae6ffdc39e4dd347d7f9796a83d4b1dcf1d753a2c42	66	The reaction of silver and oxygen to silver oxide 
+e51154235b049c7afde136dc7776b7183aa11bd29e5764c3249a4b6f15b156cd	145	Planet hunters decided to conduct follow-up observ
+f0e19a7e46ae10f4d7e427bb4ee8f71a0198a9660fb13d5bac420d4ddb3bfe01	93	You are synthesizing a dialkylphosphate from two d
+01ad9e713394d90caed9ef7e0088f1b5e8347cc44ba0ad96d8b70dc4cdecff7d	98	A coating is applied to a substrate resulting in a
+4602364dce73cc30842c87cbb7ac19f45598e181263460f53a717ce469045cb9	105	Two electromagnetic (em) fields are applied on the
+03ec6a751cd94339131edfa9914b6a3df7db7dd9461b76cf5072012e3988c61e	16	Which of the four fundamental forces present at nu

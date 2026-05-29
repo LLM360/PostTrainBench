@@ -24,6 +24,24 @@ set_default POST_TRAIN_BENCH_PROMPT "prompt"
 set_default POST_TRAIN_BENCH_JOB_SCHEDULER "htcondor"
 set_default POST_TRAIN_BENCH_EXPERIMENT_NAME ""
 
+# Teacher vLLM endpoint used by the data-engineering agent loop for synthetic
+# data generation. Populate these when running with
+# POST_TRAIN_BENCH_PROMPT=data_eng_prompt.
+set_default TEACHER_VLLM_URL ""
+set_default TEACHER_MODEL_NAME ""
+set_default TEACHER_API_KEY ""
+
+# Bind-mounted Python env (vllm + transformers + trl + peft + accelerate +
+# claude/codex/etc. CLIs) for use with ubuntu-24.04-python.sif when no
+# fakeroot-built standard.sif is available. Built once with pip --prefix.
+set_default POSTTRAIN_ENV_DIR "/mnt/weka/home/shaurya.rohatgi/posttrainbench_env"
+set_default POSTTRAIN_PYTHON_VERSION "3.12"
+
+# Stable host path that holds previously-trained checkpoints used as warm-start
+# bases. Bound into the apptainer container at /base_models so MODEL_TO_TRAIN
+# can be a path inside that mount.
+set_default BASE_MODELS_DIR "/mnt/weka/home/shaurya.rohatgi/base_models"
+
 export PYTHONNOUSERSITE=1
 
 if [ "${POST_TRAIN_BENCH_JOB_SCHEDULER}" = "htcondor_mpi-is" ]; then

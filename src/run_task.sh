@@ -50,6 +50,13 @@ if [ -d "src/eval/tasks/${EVALUATION_TASK}/evaluation_code" ]; then
 fi
 cp -r src/eval/templates "${JOB_DIR}/task/"
 
+# Data-engineering scripts: locked training recipe, decontam+diversity audit,
+# experiment-row publisher. The agent may invoke these but may not modify them.
+cp src/eval/general/train_sft.py "${JOB_DIR}/task/"
+cp src/eval/general/dataset_audit.py "${JOB_DIR}/task/"
+cp src/eval/general/publish_experiment.py "${JOB_DIR}/task/"
+mkdir -p "${JOB_DIR}/task/experiments"
+
 if [ -d "src/eval/tasks/${EVALUATION_TASK}/task_context" ]; then
     cp -r src/eval/tasks/${EVALUATION_TASK}/task_context/* "${JOB_DIR}/task"
 fi
@@ -118,12 +125,19 @@ with_record_the_time() {
 
 SOLVE_OUT="${EVAL_DIR}/solve_out.txt"
 
+# Shared append-only experiment log for parallel data-engineering agents.
+# All array members for a given (task, model) write to the same CSV on Weka.
+SHARED_LOG_DIR_HOST="${POST_TRAIN_BENCH_RESULTS_DIR}/data_eng_shared/${EVALUATION_TASK}_${RESULT_PREFIX_SAFE}"
+mkdir -p "${SHARED_LOG_DIR_HOST}"
+SHARED_LOG_CSV_CONTAINER="/shared_log/shared_log.csv"
+
 solve_task() {
     timeout --signal=TERM --kill-after=30s "$((NUM_HOURS * 60 + 5))m" \
     apptainer exec \
         --nv \
         -c \
-        --env PATH="/root/.local/bin:/home/ben/.local/bin:$PATH" \
+        --env PATH="/opt/env/local/bin:/opt/env/bin:/opt/env/node/bin:/opt/env/npm-global/bin:/root/.local/bin:/home/ben/.local/bin:$PATH" \
+        --env PYTHONPATH="/opt/env/local/lib/python${POSTTRAIN_PYTHON_VERSION}/dist-packages" \
         --env HF_HOME="${HF_HOME_NEW}" \
         --env ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY}" \
         --env CODEX_API_KEY="${CODEX_API_KEY}" \
@@ -136,8 +150,19 @@ solve_task() {
         --env NUM_GPUS="${NUM_GPUS}" \
         --env PROMPT="${PROMPT}" \
         --env AGENT_CONFIG="${AGENT_CONFIG}" \
+        --env TEACHER_VLLM_URL="${TEACHER_VLLM_URL:-}" \
+        --env TEACHER_MODEL_NAME="${TEACHER_MODEL_NAME:-}" \
+        --env TEACHER_API_KEY="${TEACHER_API_KEY:-}" \
+        --env VLLM_DEFAULT_SERVER_ARGS='{"enforce_eager": true}' \
+        --env SHARED_LOG_CSV="${SHARED_LOG_CSV_CONTAINER}" \
+        --env AGENT_ID="${AGENT}-${CLUSTER_ID}" \
+        --env CLUSTER_ID="${CLUSTER_ID}" \
+        --env MODEL_TO_TRAIN="${MODEL_TO_TRAIN}" \
         --bind "${JOB_TMP}:/tmp" \
         --bind "${HF_MERGED}:${HF_HOME_NEW}" \
+        --bind "${SHARED_LOG_DIR_HOST}:/shared_log" \
+        --bind "${POSTTRAIN_ENV_DIR}:/opt/env" \
+        --bind "${BASE_MODELS_DIR:-/mnt/weka/home/shaurya.rohatgi/base_models}:/base_models" \
         --home "${JOB_DIR}:/home/ben" \
         --pwd "/home/ben/task" \
         --writable-tmpfs \
@@ -198,13 +223,15 @@ cp -r "containers/other_home_data/.codex" "${JOB_DIR}/"
 with_huggingface_overlay apptainer exec \
     --nv \
     -c \
-    --env PATH="/root/.local/bin:/home/ben/.local/bin:$PATH" \
+    --env PATH="/opt/env/local/bin:/opt/env/bin:/opt/env/node/bin:/opt/env/npm-global/bin:/root/.local/bin:/home/ben/.local/bin:$PATH" \
+    --env PYTHONPATH="/opt/env/local/lib/python${POSTTRAIN_PYTHON_VERSION}/dist-packages" \
     --env HF_HOME="${HF_HOME_NEW}" \
     --env CODEX_API_KEY="${CODEX_API_KEY}" \
     --env VLLM_API_KEY="inspectai" \
     --env PYTHONNOUSERSITE="1" \
     --bind "${JOB_TMP}:/tmp" \
     --bind "${HF_MERGED}:${HF_HOME_NEW}" \
+    --bind "${POSTTRAIN_ENV_DIR}:/opt/env" \
     --home "${JOB_DIR}:/home/ben" \
     --pwd "/home/ben/task" \
     --writable-tmpfs \
@@ -225,11 +252,34 @@ tree ${JOB_DIR}/task
 echo "================================"
 
 if [ -d "${JOB_DIR}/task/final_model" ]; then
+    # -L: dereference symlinks (agent may promote via `ln -sfn experiments/exp_N/final_model final_model`)
     cp -r "${JOB_DIR}/task/final_model" "$EVAL_DIR/final_model"
 fi
 
 if [ -f "${JOB_DIR}/task/system_monitor.log" ]; then
     cp "${JOB_DIR}/task/system_monitor.log" "$EVAL_DIR/system_monitor.log"
+fi
+
+# Belt-and-suspenders: snapshot per-experiment metadata into a dedicated
+# directory *before* delete_hf_models.py and the bulk task/ copy. This way
+# the notes, audit reports, manifests, and the experiment index survive even
+# if downstream cleanup misbehaves.
+if [ -d "${JOB_DIR}/task/experiments" ]; then
+    mkdir -p "$EVAL_DIR/experiment_notes"
+    if [ -f "${JOB_DIR}/task/experiments/index.csv" ]; then
+        cp "${JOB_DIR}/task/experiments/index.csv" "$EVAL_DIR/experiment_notes/index.csv"
+    fi
+    for exp_dir in "${JOB_DIR}/task/experiments"/exp_*; do
+        [ -d "$exp_dir" ] || continue
+        exp_name=$(basename "$exp_dir")
+        mkdir -p "$EVAL_DIR/experiment_notes/$exp_name"
+        for fname in notes.md dataset_audit_report.json train_manifest.json source_counts.json; do
+            if [ -f "$exp_dir/$fname" ]; then
+                cp "$exp_dir/$fname" "$EVAL_DIR/experiment_notes/$exp_name/$fname"
+            fi
+        done
+    done
+    echo "Saved experiment notes to: $EVAL_DIR/experiment_notes"
 fi
 
 python containers/delete_hf_models.py "${JOB_DIR}/task"
@@ -255,13 +305,17 @@ run_evaluation() {
     sleep 5
     with_huggingface_overlay apptainer exec \
         --nv \
+        --env PATH="/opt/env/local/bin:/opt/env/bin:/opt/env/node/bin:/opt/env/npm-global/bin:$PATH" \
+        --env PYTHONPATH="/opt/env/local/lib/python${POSTTRAIN_PYTHON_VERSION}/dist-packages" \
         --env "HF_HOME=${TMP_HF_CACHE}" \
         --env OPENAI_API_KEY="${OPENAI_API_KEY}" \
         --env VLLM_API_KEY="inspectai" \
+        --env VLLM_DEFAULT_SERVER_ARGS='{"enforce_eager": true}' \
         --env PYTHONNOUSERSITE="1" \
         --writable-tmpfs \
         --bind "${REPO_ROOT}:${REPO_ROOT}" \
         --bind "${HF_MERGED}:${TMP_HF_CACHE}" \
+        --bind "${POSTTRAIN_ENV_DIR}:/opt/env" \
         --pwd "$(pwd)/src/eval/tasks/${EVALUATION_TASK}" \
         ${POST_TRAIN_BENCH_CONTAINERS_DIR}/vllm_debug.sif python "evaluate.py" \
             --model-path "$EVAL_DIR/final_model" \

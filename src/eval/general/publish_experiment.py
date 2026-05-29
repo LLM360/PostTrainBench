@@ -21,8 +21,18 @@ Round 2 additions (hypothesis-driven experiment notes):
   pivots allowed when ## PivotReason is provided.
 - Promoted data is persisted to <shared_dir>/promoted/<sha>.jsonl so
   future agents in future runs can fork the actual data.
-- CSV schema is versioned via a "# schema_version=2" comment line; an
-  on-disk v1 file is rotated aside on first v2 write.
+- CSV schema is versioned via a `# schema_version=N` comment line. An
+  on-disk file from an older schema is rotated aside under the flock on
+  first write at the new version. The .lock sidecar path is stable
+  across schema rolls so concurrent writers do not lose mutex.
+
+Schema history:
+- v1: original fields.
+- v2: added parent_exp_id, hypothesis_short, conclusion_short, audit_pass,
+       notes_excerpt.
+- v3: added `promoted` column (cross-run handoff signal); strategy_short
+       and notes_excerpt are now numeric-scrubbed identically to the other
+       free-text fields.
 """
 from __future__ import annotations
 
@@ -38,7 +48,7 @@ import shutil
 import sys
 from pathlib import Path
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 SCHEMA_HEADER_LINE = f"# schema_version={SCHEMA_VERSION}\n"
 
 SHARED_FIELDS = [
@@ -59,6 +69,7 @@ SHARED_FIELDS = [
     "hypothesis_short",
     "conclusion_short",
     "audit_pass",
+    "promoted",
     "notes_excerpt",
 ]
 
@@ -229,21 +240,28 @@ def _peek_first_line(path: Path) -> str:
         return ""
 
 
-def _rotate_v1_file(csv_path: Path) -> None:
+def _rotate_old_schema_file(csv_path: Path, old_version: str) -> None:
+    """Rotate a CSV with a stale schema aside; KEEP the .lock file stable.
+
+    The lock file path must not change: concurrent writers that already
+    opened the old lock fd would otherwise lose mutual exclusion against
+    new writers that open a freshly-created lock. We only rename the CSV
+    itself.
+    """
     ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    rotated = csv_path.with_name(f"{csv_path.stem}.v1.{ts}{csv_path.suffix}")
+    rotated = csv_path.with_name(
+        f"{csv_path.stem}.{old_version}.{ts}{csv_path.suffix}"
+    )
     # os.replace is atomic on POSIX within the same filesystem.
     os.replace(str(csv_path), str(rotated))
-    # Also rotate the lock file if present (best-effort).
-    lock_path = csv_path.with_suffix(csv_path.suffix + ".lock")
-    if lock_path.exists():
-        try:
-            os.replace(
-                str(lock_path),
-                str(lock_path.with_name(f"{csv_path.stem}.v1.{ts}{csv_path.suffix}.lock")),
-            )
-        except OSError:
-            pass
+
+
+_SCHEMA_VERSION_RE = re.compile(r"^#\s*schema_version=([0-9A-Za-z_.-]+)")
+
+
+def _detect_schema_version(first_line: str) -> str | None:
+    m = _SCHEMA_VERSION_RE.match(first_line)
+    return m.group(1) if m else None
 
 
 def append_with_flock(
@@ -259,10 +277,12 @@ def append_with_flock(
     *before* the flock so the parent dir is guaranteed to exist for every
     holder.
 
-    When `versioned=True`, the file is preceded by a "# schema_version=2\n"
-    line. If an existing file's first line is not the v2 header, it is
-    rotated to <stem>.v1.<timestamp>.<ext> under the flock and a fresh v2
-    file is written.
+    When `versioned=True`, the file is preceded by a `# schema_version=<N>\n`
+    line. If an existing file's first line is not the current schema header,
+    it is rotated to `<stem>.<old_version>.<timestamp>.<ext>` *while holding
+    the lock on the stable .lock path*, and a fresh file is written. The
+    .lock file itself is never rotated — concurrent writers must continue
+    to mutually exclude against the same lock path across schema rolls.
     """
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = csv_path.with_suffix(csv_path.suffix + ".lock")
@@ -276,7 +296,8 @@ def append_with_flock(
             if versioned and not needs_header:
                 first_line = _peek_first_line(csv_path)
                 if not first_line.startswith(f"# schema_version={SCHEMA_VERSION}"):
-                    _rotate_v1_file(csv_path)
+                    old = _detect_schema_version(first_line) or "v0"
+                    _rotate_old_schema_file(csv_path, old)
                     needs_header = True
             with csv_path.open("a", newline="") as cf:
                 if needs_header and versioned:
@@ -534,6 +555,9 @@ def main() -> int:
         "hypothesis_short": hypothesis_short,
         "conclusion_short": conclusion_short,
         "audit_pass": audit_pass,
+        # Promoted rows are the cross-run handoff signal — peers in future
+        # runs look for promoted=True to find datasets worth forking.
+        "promoted": bool(args.promoted),
         "notes_excerpt": notes_excerpt,
     }
     reject_forbidden(shared_row)

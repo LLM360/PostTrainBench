@@ -208,7 +208,7 @@ with_huggingface_overlay apptainer exec \
     --home "${JOB_DIR}:/home/ben" \
     --pwd "/home/ben/task" \
     --writable-tmpfs \
-    ${POST_TRAIN_BENCH_CONTAINERS_DIR}/${POST_TRAIN_BENCH_CONTAINER_NAME}.sif codex --search -a never exec --json -c model_reasoning_summary=detailed --skip-git-repo-check --yolo --model "gpt-5.1-codex" "$JUDGE_TASK" 2>&1 | tee "${EVAL_DIR}/judge_output.json"
+    ${POST_TRAIN_BENCH_CONTAINERS_DIR}/${POST_TRAIN_BENCH_CONTAINER_NAME}.sif codex --search -a never exec --json -c model_reasoning_summary=detailed --skip-git-repo-check --yolo --model "${JUDGE_MODEL:-gpt-5.1-codex}" "$JUDGE_TASK" 2>&1 | tee "${EVAL_DIR}/judge_output.json" || echo "contamination judge step did not complete cleanly (model auth or transient error)"
 
 # Convert judge JSON output to human-readable format
 python agents/codex/human_readable_trace.py "${EVAL_DIR}/judge_output.json" -o "${EVAL_DIR}/judge_output.txt"
@@ -225,7 +225,11 @@ tree ${JOB_DIR}/task
 echo "================================"
 
 if [ -d "${JOB_DIR}/task/final_model" ]; then
-    cp -r "${JOB_DIR}/task/final_model" "$EVAL_DIR/final_model"
+    # -L: dereference symlinks. Agents commonly promote a per-experiment
+    # checkpoint into the run's final_model via `ln -sfn experiments/exp_N/final_model final_model`;
+    # without -L the cp would copy the symlink itself and we'd end up with a
+    # dangling link in $EVAL_DIR after the rest of task/ is cleaned up.
+    cp -rL "${JOB_DIR}/task/final_model" "$EVAL_DIR/final_model"
 fi
 
 if [ -f "${JOB_DIR}/task/system_monitor.log" ]; then
@@ -264,7 +268,7 @@ run_evaluation() {
         --bind "${HF_MERGED}:${TMP_HF_CACHE}" \
         --pwd "$(pwd)/src/eval/tasks/${EVALUATION_TASK}" \
         ${POST_TRAIN_BENCH_CONTAINERS_DIR}/vllm_debug.sif python "evaluate.py" \
-            --model-path "$EVAL_DIR/final_model" \
+            --model-path "$(realpath "$EVAL_DIR")/final_model" \
             --templates-dir ../../../../src/eval/templates \
             --limit -1 \
             ${max_tokens_arg} \

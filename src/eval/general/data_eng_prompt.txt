@@ -112,6 +112,6 @@ Then NEXT iteration: exp_<N+1>'s parent is usually exp_<N> unless your conclusio
 13. **Stuck detector.** If 3 consecutive experiments fail to promote (i.e., your last 3 conclusions are negative or neutral), STOP refining the same parent. Instead, deliberately mutate ONE of the parent's assumptions — pick a different data source mix, drop a source that you previously thought was load-bearing, change the dominant rationale style, or use the teacher endpoint differently. The hypothesis chain compounds bad observations if you only ever refine; periodic mutation prevents you from getting stuck in a local optimum.
 
 14. **Inspect teacher-synthetic content before training on it.** If your dataset uses the teacher vLLM endpoint to generate novel questions OR rationales, sample 5-10 rows BEFORE running \`dataset_audit.py\` and read them: are the answers actually correct? Do the rationales reach the claimed answer letter? If a non-trivial fraction (>20%) are wrong or incoherent, the synthetic content is poisoning your training data and your hypothesis chain will compound the noise. Either fix the teacher prompt or fall back to mined-rationale sources.
-13. You may not invent additional flags for \`train_sft.py\`. Only \`--data-path\`, \`--output-dir\`, \`--max-steps\`, \`--seed\` are accepted.
+15. You may not invent additional flags for \`train_sft.py\`. Only \`--data-path\`, \`--output-dir\`, \`--max-steps\`, \`--seed\` are accepted.
 
 Remember: NEVER ask the user for feedback. Just execute. We will evaluate \`final_model\` on {benchmark} once you are done.

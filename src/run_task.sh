@@ -24,6 +24,11 @@ fi
 export EVAL_DIR="${POST_TRAIN_BENCH_RESULTS_DIR}/${AGENT}_${AGENT_CONFIG_SAFE}_${NUM_HOURS}h${GPU_SUFFIX}${POST_TRAIN_BENCH_EXPERIMENT_NAME}/${EVALUATION_TASK}_${RESULT_PREFIX_SAFE}_${CLUSTER_ID}"
 
 mkdir -p ${EVAL_DIR}
+# Resolve EVAL_DIR to an absolute path once so anything passed to a
+# process with a custom --pwd (e.g. the evaluator running under
+# `--pwd .../src/eval/tasks/$TASK`) lands in the right place rather than
+# under that pwd. Must happen after mkdir -p (realpath needs it to exist).
+export EVAL_DIR="$(realpath "${EVAL_DIR}")"
 
 # Resolve EVAL_DIR to an absolute path defensively. The evaluator at the
 # bottom of this script runs with `--pwd src/eval/tasks/${EVALUATION_TASK}`,
@@ -295,7 +300,26 @@ with_huggingface_overlay apptainer exec \
     --home "${JOB_DIR}:/home/ben" \
     --pwd "/home/ben/task" \
     --writable-tmpfs \
-    ${POST_TRAIN_BENCH_CONTAINERS_DIR}/${POST_TRAIN_BENCH_CONTAINER_NAME}.sif codex --search -a never exec --json -c model_reasoning_summary=detailed --skip-git-repo-check --yolo --model "gpt-5.1-codex" "$JUDGE_TASK" 2>&1 | tee "${EVAL_DIR}/judge_output.json"
+    ${POST_TRAIN_BENCH_CONTAINERS_DIR}/${POST_TRAIN_BENCH_CONTAINER_NAME}.sif codex --search -a never exec --json -c model_reasoning_summary=detailed --skip-git-repo-check --yolo --model "${JUDGE_MODEL:-gpt-5.1-codex}" "$JUDGE_TASK" 2>&1 | tee "${EVAL_DIR}/judge_output.json"
+
+# Capture the codex (apptainer) exit status from the pipeline above.
+# `set -o pipefail` is not enabled, and `tee` will almost always succeed,
+# so a trailing `|| echo ...` after the pipe would never fire on codex
+# failure. ${PIPESTATUS[0]} is the actual codex exit code.
+JUDGE_EXIT=${PIPESTATUS[0]}
+if [ "${JUDGE_EXIT}" -ne 0 ]; then
+    echo "contamination judge step did not complete cleanly (exit ${JUDGE_EXIT}; model auth or transient error)"
+    # Write explicit failure markers so that downstream code that just
+    # greps these files doesn't treat a missing/empty file as a clean
+    # "no contamination / no disallowed model" verdict.
+    JUDGE_FAILURE_MSG="JUDGE_FAILED: contamination judge did not complete (exit ${JUDGE_EXIT})"
+    if [ ! -s "${JOB_DIR}/task/contamination_judgement.txt" ]; then
+        echo "${JUDGE_FAILURE_MSG}" > "${JOB_DIR}/task/contamination_judgement.txt"
+    fi
+    if [ ! -s "${JOB_DIR}/task/disallowed_model_judgement.txt" ]; then
+        echo "${JUDGE_FAILURE_MSG}" > "${JOB_DIR}/task/disallowed_model_judgement.txt"
+    fi
+fi
 
 # Convert judge JSON output to human-readable format
 python agents/codex/human_readable_trace.py "${EVAL_DIR}/judge_output.json" -o "${EVAL_DIR}/judge_output.txt"
@@ -312,9 +336,19 @@ tree ${JOB_DIR}/task
 echo "================================"
 
 if [ -d "${JOB_DIR}/task/final_model" ]; then
-    # The data-eng prompt instructs agents to `cp -r` (not symlink) their
-    # promoted experiment into final_model/, so a plain cp -r here suffices.
-    cp -r "${JOB_DIR}/task/final_model" "$EVAL_DIR/final_model"
+    # -aH: archive mode (preserves attributes, recursive) and dereference
+    # ONLY the command-line symlink. Even though the data-eng prompt now
+    # tells agents to `cp -r` (not symlink) their promoted experiment into
+    # final_model/, this provides defense-in-depth: if an agent ignores
+    # the prompt and uses `ln -sfn experiments/exp_N/final_model final_model`,
+    # we want the top-level link followed so we don't end up with a dangling
+    # link in $EVAL_DIR after the rest of task/ is cleaned up.
+    #
+    # We deliberately do NOT use -L (which dereferences every symlink it
+    # recursively encounters): the agent controls the contents of
+    # final_model/, so nested symlinks pointing at arbitrary
+    # host-visible paths could otherwise be slurped into results.
+    cp -aH "${JOB_DIR}/task/final_model" "$EVAL_DIR/final_model"
 fi
 
 if [ -f "${JOB_DIR}/task/system_monitor.log" ]; then
@@ -399,11 +433,11 @@ run_evaluation() {
         "${extra_bind[@]}" \
         --pwd "$(pwd)/src/eval/tasks/${EVALUATION_TASK}" \
         ${POST_TRAIN_BENCH_CONTAINERS_DIR}/vllm_debug.sif python "evaluate.py" \
-            --model-path "$EVAL_DIR/final_model" \
+            --model-path "${EVAL_DIR}/final_model" \
             --templates-dir ../../../../src/eval/templates \
             --limit -1 \
             ${max_tokens_arg} \
-            --json-output-file "${EVAL_DIR}/metrics.json" > "$EVAL_DIR/final_eval_${eval_num}.txt"
+            --json-output-file "${EVAL_DIR}/metrics.json" > "${EVAL_DIR}/final_eval_${eval_num}.txt"
 }
 
 run_evaluation_with_retry() {

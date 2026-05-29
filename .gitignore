@@ -14,6 +14,9 @@ CLAUDE.md
 logs
 .vscode
 
+# Pilot/run outputs (large artifacts, not source)
+results/
+
 containers/empty_dot_git
 
 2025-10-13/*

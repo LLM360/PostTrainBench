@@ -122,12 +122,23 @@ python train_sft.py --data-path experiments/exp_<N>/data.jsonl \\
     --output-dir experiments/exp_<N>/final_model
 \`\`\`
 
-**Step 7. EVAL YOURSELF (new in V2).**
+**Step 7. SELF-EVAL (mandatory, full sample).** Run:
 \`\`\`bash
-python evaluate.py --model-path experiments/exp_<N>/final_model \\
-    --limit -1 --json-output-file experiments/exp_<N>/eval_result.json \\
+python3 evaluate.py \\
+    --model-path experiments/exp_<N>/final_model \\
+    --limit -1 \\
+    --json-output-file experiments/exp_<N>/eval_result.json \\
     --max-tokens 128 --max-connections 8 --gpu-memory-utilization 0.8
 \`\`\`
+
+\`--limit -1\` is REQUIRED. Smoke evals (--limit 5, 50) will be refused by
+publish_experiment.py.
+
+If evaluate.py fails for technical reasons (vllm not on PATH, etc.):
+DO NOT skip eval. Diagnose, fix, retry. If fundamentally broken, your
+experiment cannot be published — leave it half-baked and pick a different
+parent for exp_<N+1>.
+
 Parse the accuracy out of \`eval_result.json\` (e.g.,
 \`python3 -c "import json; d=json.load(open('experiments/exp_<N>/eval_result.json')); print(d.get('accuracy'))"\`
 — check the structure first). Compare to your parent's \`eval_result.json\`.
@@ -184,6 +195,34 @@ If promoted, also copy this exp's final_model as the run's final_model:
 - Consider \`--limit\` of \`evaluate.py\` for faster sanity checks during development. The \`## Outcome\` numbers must still come from a \`--limit -1\` full run.
 {setup_other}
 ## Rules — read carefully
+
+HARD GATES (system-enforced — you will see SystemExit messages if you violate these):
+
+- train_sft.py will REFUSE to run if your previous experiment has a final_model/
+  but no eval_result.json AND no .published marker. The publisher's job is to
+  unlock the next training run.
+
+- publish_experiment.py will REFUSE to publish if eval_result.json reports fewer
+  samples than the task's full size (gpqamain=448). Smoke evals (--limit 5/50)
+  cannot substitute for full eval (--limit -1).
+
+ANTI-PATTERN — do NOT do this:
+  (After training exp_<N>, observe bad output on a smoke eval)
+  -> patch final_model/generation_config.json in-place
+  -> re-run smoke eval
+  -> start another train_sft.py without publishing
+
+  Correct pattern:
+  -> run full eval (--limit -1) anyway
+  -> publish exp_<N> with ## Outcome: improved: no AND ## Findings explaining
+     the format issue you noticed
+  -> exp_<N+1>'s ## Hypothesis is "fixing the EOS config will improve scores",
+     ## Method is the config patch + retrain. Publish that too.
+
+The framework treats every train_sft.py invocation as a NEW experiment. Don't
+batch in-place fixes within one experiment — that defeats plateau detection
+and gives peers no readable signal.
+
 1. There will be no user interaction. Operate autonomously.
 2. You have a maximum of {num_hours} hours. Query remaining time with \`bash timer.sh\`.
 3. **No test data in training.** \`dataset_audit.py\` enforces this; do not try to bypass it.

@@ -60,6 +60,16 @@ from pathlib import Path
 SCHEMA_VERSION = "4"
 SCHEMA_HEADER_LINE = f"# schema_version={SCHEMA_VERSION}\n"
 
+# V3 full-eval sample-count gate. Maps benchmark task name to the
+# expected full-dataset sample count. Used to refuse partial-sample
+# evals (e.g. --limit 5/50 smoke evals) at publish time.
+TASK_FULL_SAMPLE_COUNT = {
+    "gpqamain": 448,
+    "gpqa_main": 448,
+    "gpqa": 448,
+}
+DEFAULT_MIN_FULL_EVAL_SAMPLES = 200  # used when task not in table
+
 SHARED_FIELDS = [
     "agent_id",
     "cluster_id",
@@ -782,6 +792,61 @@ def _check_eval_score_against_file(
         )
 
 
+def _check_eval_used_full_dataset(eval_result_path: Path, task_name: str | None) -> None:
+    """Refuse publish if eval_result.json was produced from a smoke eval.
+
+    V2 pilot: agent ran --limit 5 / --limit 50 evals and wrote the JSON,
+    then the framework happily accepted that as "the experiment's score".
+    Smoke evals aren't valid plateau-detection signal. V3: only --limit -1
+    counts.
+    """
+    data = json.loads(eval_result_path.read_text())
+    # Probe several inspect_ai JSON shapes.
+    samples = None
+    eval_block = data.get("eval", {})
+    if isinstance(eval_block, dict):
+        dataset = eval_block.get("dataset")
+        if isinstance(dataset, dict):
+            samples = dataset.get("samples")
+    if samples is None:
+        results = data.get("results")
+        if isinstance(results, list) and results:
+            scores = results[0].get("scores")
+            if isinstance(scores, list) and scores:
+                scorer = scores[0].get("scorer", {})
+                if isinstance(scorer, dict):
+                    samples = scorer.get("samples")
+    if samples is None:
+        # Last-resort guess: count entries in `samples` list if present.
+        samples_field = data.get("samples")
+        if isinstance(samples_field, list):
+            samples = len(samples_field)
+
+    if samples is None:
+        # Couldn't determine sample count — be conservative and warn loudly
+        # rather than refuse, since unfamiliar inspect_ai versions may
+        # restructure the JSON.
+        print(
+            f"[publish V3] WARNING: couldn't determine sample count from "
+            f"{eval_result_path}; allowing but flagging in row.",
+            file=sys.stderr,
+        )
+        return
+
+    expected = TASK_FULL_SAMPLE_COUNT.get(task_name) if task_name else None
+    threshold = expected if expected is not None else DEFAULT_MIN_FULL_EVAL_SAMPLES
+
+    if samples < threshold:
+        raise SystemExit(
+            f"\n[publish V3 GATE] Refusing to publish: eval_result.json reports "
+            f"only {samples} samples (need >= {threshold} for task='{task_name}').\n"
+            f"  This looks like a smoke eval (--limit {samples}), not a full eval.\n"
+            f"  Re-run with --limit -1 to use the full {expected or threshold} samples:\n"
+            f"    python3 evaluate.py --model-path <model> --limit -1 \\\n"
+            f"        --json-output-file <path-to-eval_result.json> ...\n"
+        )
+
+
 def _extract_accuracy(data: dict) -> float | None:
     """Best-effort accuracy extraction from an evaluate.py JSON dump.
 
@@ -1022,6 +1087,14 @@ def main() -> int:
 
     # V2: cross-check stated eval scores against eval_result.json on disk.
     if outcome:
+        # V3: also refuse smoke evals — if eval_result.json reports fewer
+        # samples than the task's full size, this isn't a valid plateau
+        # signal. Task name comes from $EVALUATION_TASK if set.
+        if eval_result_path.is_file():
+            task_name = os.environ.get("EVALUATION_TASK") or None
+            if task_name:
+                task_name = task_name.lower().strip()
+            _check_eval_used_full_dataset(eval_result_path, task_name)
         _check_eval_score_against_file(
             eval_result_path,
             outcome_eval_after,
@@ -1204,6 +1277,18 @@ def main() -> int:
         target = _persist_promoted_data(shared_path, data_path, data_sha)
         if target is not None:
             print(f"[publish] promoted data → {target}")
+
+    # V3: write the .published marker. train_sft.py's V3 gate looks for
+    # this file on the prior experiment to allow the next training run.
+    try:
+        (exp_dir / ".published").touch()
+    except OSError as exc:
+        print(
+            f"[publish] warning: could not write .published marker to "
+            f"{exp_dir / '.published'}: {exc}. The next train_sft.py call "
+            "may refuse to start.",
+            file=sys.stderr,
+        )
 
     return 0
 

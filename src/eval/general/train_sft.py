@@ -94,6 +94,137 @@ def load_and_validate(path: Path) -> list[dict]:
     return rows
 
 
+def _check_prior_experiment_published(output_dir: str) -> None:
+    """Refuse training if the most recent experiment isn't fully published.
+
+    Logic: derive the experiment dir for the run we're about to start
+    (parent of --output-dir if it ends in /final_model, otherwise the
+    --output-dir itself's parent). Scan `experiments/` for the
+    highest-numbered exp_NNN dir that is NOT the current one. If that
+    prior exp has a `final_model/` directory (training completed) but
+    no `eval_result.json` (full --limit -1 self-eval) AND no
+    `.published` marker, refuse to train.
+    """
+    import re
+
+    out = Path(output_dir).resolve()
+    # Detect experiments root: typical paths are
+    #   experiments/exp_007/final_model   -> exp dir is experiments/exp_007
+    #   experiments/exp_007               -> exp dir is itself
+    current_exp_dir = out.parent if out.name == "final_model" else out
+    experiments_root = current_exp_dir.parent
+    if not experiments_root.is_dir() or experiments_root.name != "experiments":
+        return  # not in the standard layout; skip (e.g. ad-hoc runs)
+
+    exp_pat = re.compile(r"^exp_(\d+)$")
+    candidates = []
+    for child in experiments_root.iterdir():
+        if not child.is_dir():
+            continue
+        m = exp_pat.match(child.name)
+        if not m:
+            continue
+        if child.resolve() == current_exp_dir.resolve():
+            continue
+        candidates.append((int(m.group(1)), child))
+    if not candidates:
+        return  # no prior experiments
+
+    candidates.sort()
+    prior_n, prior_dir = candidates[-1]
+
+    has_final_model = (prior_dir / "final_model").is_dir()
+    has_eval_result = (prior_dir / "eval_result.json").is_file()
+    has_published_marker = (prior_dir / ".published").is_file()
+
+    if has_final_model and not has_published_marker:
+        if not has_eval_result:
+            msg = (
+                f"\n[train_sft V3 GATE] Refusing to train exp_{current_exp_dir.name.split('_')[-1]}: "
+                f"prior experiment exp_{prior_n:03d} has final_model/ but no eval_result.json.\n"
+                f"  You ran train_sft.py on exp_{prior_n:03d} but never ran the full-sample\n"
+                f"  evaluator. Required next action:\n"
+                f"    python3 evaluate.py --model-path experiments/exp_{prior_n:03d}/final_model \\\n"
+                f"        --limit -1 --json-output-file experiments/exp_{prior_n:03d}/eval_result.json \\\n"
+                f"        --max-tokens 128 --max-connections 8 --gpu-memory-utilization 0.8\n"
+                f"  Then: python3 publish_experiment.py --exp-dir experiments/exp_{prior_n:03d}/\n"
+                f"  Then you may start exp_{current_exp_dir.name.split('_')[-1]}.\n"
+            )
+            raise SystemExit(msg)
+        else:
+            msg = (
+                f"\n[train_sft V3 GATE] Refusing to train exp_{current_exp_dir.name.split('_')[-1]}: "
+                f"prior experiment exp_{prior_n:03d} has eval_result.json but was never published.\n"
+                f"  Required next action:\n"
+                f"    python3 publish_experiment.py --exp-dir experiments/exp_{prior_n:03d}/\n"
+                f"  Then you may start exp_{current_exp_dir.name.split('_')[-1]}.\n"
+            )
+            raise SystemExit(msg)
+
+
+def _format_preflight(base_model_path: str, tokenizer) -> None:
+    """Catch chat_template/EOS misconfig before training, not after.
+
+    V2 burned ~30 min of pilot time when the trained model's saved
+    config listed only <|endoftext|> (151643) as EOS but the chat
+    template ended turns with <|im_end|> (151645). The model
+    overgenerated past the answer line and the agent fell into a
+    debugging loop. This pre-flight surfaces the mismatch loudly
+    before we spend an hour training.
+    """
+    print("[train_sft] === format pre-flight ===", flush=True)
+    print(f"[train_sft] tokenizer.eos_token={tokenizer.eos_token!r} id={tokenizer.eos_token_id}", flush=True)
+    print(f"[train_sft] tokenizer.pad_token={tokenizer.pad_token!r} id={tokenizer.pad_token_id}", flush=True)
+
+    # Probe chat_template if present — render a one-turn convo and see what
+    # special tokens it emits. Loud warn if it emits a token that's NOT in
+    # the saved generation_config's eos_token_id list.
+    try:
+        rendered = tokenizer.apply_chat_template(
+            [{"role": "user", "content": "test"}, {"role": "assistant", "content": "ok"}],
+            tokenize=False,
+        )
+        # Find any special token strings in the rendered output that match
+        # known EOS-like patterns.
+        eos_like = []
+        for tok in ("<|im_end|>", "<|endoftext|>", "<|eot_id|>", "</s>"):
+            if tok in rendered:
+                eos_like.append(tok)
+        if eos_like:
+            print(f"[train_sft] chat_template uses these end-tokens: {eos_like}", flush=True)
+            template_eos_ids = []
+            for tok in eos_like:
+                tid = tokenizer.convert_tokens_to_ids(tok)
+                if tid is not None and tid != tokenizer.unk_token_id:
+                    template_eos_ids.append((tok, tid))
+            print(f"[train_sft] their token ids: {template_eos_ids}", flush=True)
+
+            # Compare against base model's generation_config.json if present.
+            base_path = Path(base_model_path)
+            gen_cfg_path = base_path / "generation_config.json"
+            if gen_cfg_path.is_file():
+                gen_cfg = json.loads(gen_cfg_path.read_text())
+                gen_eos = gen_cfg.get("eos_token_id")
+                if gen_eos is None:
+                    gen_eos = []
+                elif isinstance(gen_eos, int):
+                    gen_eos = [gen_eos]
+                template_ids = [tid for _, tid in template_eos_ids]
+                missing = [tid for tid in template_ids if tid not in gen_eos]
+                if missing:
+                    print(
+                        f"[train_sft] WARNING: chat_template uses EOS-like ids {missing} "
+                        f"not in base generation_config.eos_token_id={gen_eos}. "
+                        f"The trained model may overgenerate past expected stop tokens. "
+                        f"Consider widening eos_token_id in your training output or in your "
+                        f"build_dataset.py to terminate assistant messages with <|endoftext|>.",
+                        flush=True,
+                    )
+    except Exception as e:
+        print(f"[train_sft] chat_template probe skipped ({e})", flush=True)
+    print("[train_sft] === pre-flight done ===", flush=True)
+
+
 def _require_matching_audit(data_path: Path) -> None:
     """Refuse to train if the sibling audit report is missing, failing, or stale.
 
@@ -137,6 +268,14 @@ def _require_matching_audit(data_path: Path) -> None:
 
 def main() -> int:
     args = parse_args()
+
+    # V3 publish-discipline gate.
+    # Refuse to train if there's an unpublished prior experiment: the agent
+    # must complete the train → full-eval → publish cycle for exp_<N-1>
+    # before starting exp_<N>. This kills the in-place fix-and-retry
+    # anti-pattern that produced zero publishes in the V2 pilot.
+    _check_prior_experiment_published(args.output_dir)
+
     base_model = os.environ.get("MODEL_TO_TRAIN")
     if not base_model:
         raise SystemExit("$MODEL_TO_TRAIN must be set (the locked recipe trains this model only)")
@@ -173,6 +312,8 @@ def main() -> int:
         base_model,
         dtype=torch.bfloat16,
     )
+
+    _format_preflight(base_model, tokenizer)
 
     lora_cfg = LoraConfig(
         r=LORA_R,

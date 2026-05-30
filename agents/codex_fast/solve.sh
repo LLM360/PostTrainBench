@@ -8,6 +8,10 @@
 # agents/codex_non_api/auth.json for any codex_* agent that doesn't
 # ship its own auth file, so the documented `codex login` setup is
 # sufficient — no manual duplication.
+#
+# V3: respawn-loop. If codex exits while the SLURM timer still has time,
+# we re-launch it with a continuation note appended to the prompt. The
+# framework — not the agent's whim — decides when the run ends.
 
 unset ANTHROPIC_API_KEY
 unset GEMINI_API_KEY
@@ -33,7 +37,54 @@ printf 'model_reasoning_effort = "xhigh"\nservice_tier = "fast"\n\n' > "$tmp"
 [ -f "$file" ] && cat "$file" >> "$tmp"
 mv "$tmp" "$file"
 
-codex --search exec --json \
-    -c model_reasoning_summary=detailed \
-    --skip-git-repo-check --yolo \
-    --model "$AGENT_CONFIG" "$PROMPT"
+CONTINUATION_NOTE='
+[SOLVE.SH RESPAWN] Your previous codex session exited but the SLURM timer
+still has time remaining. Resume your work. Check git/file state of
+experiments/ — find the highest exp_NNN. If it has final_model/ but no
+eval_result.json, run the full eval next. If eval_result.json exists but
+no .published, run publish_experiment.py next. If everything is published,
+start exp_<N+1>. NEVER STOP.
+'
+
+# Locate timer.sh. run_task.sh installs it at /home/ben/task/timer.sh,
+# but fall back to CWD so this is robust if the layout changes.
+TIMER_SH=/home/ben/task/timer.sh
+[ -f "$TIMER_SH" ] || TIMER_SH=./timer.sh
+
+ATTEMPT=0
+while true; do
+    # Timer check. create_timer.sh emits "Timer expired!" on expiry,
+    # otherwise two lines: "Remaining time (hours:minutes):" and "H:MM".
+    # We also treat a "0:00" remaining reading as expired.
+    if [ -x "$TIMER_SH" ] || [ -f "$TIMER_SH" ]; then
+        TIMER_OUT="$(bash "$TIMER_SH" 2>&1 || true)"
+    else
+        TIMER_OUT=""
+    fi
+    if echo "$TIMER_OUT" | grep -qiE "Timer expired|TIME_UP|^0:00$| 0:00$"; then
+        echo "[solve.sh] timer says time is up ($TIMER_OUT). Exiting respawn loop."
+        break
+    fi
+
+    ATTEMPT=$((ATTEMPT + 1))
+    echo "[solve.sh] launching codex attempt #$ATTEMPT at $(date -u +%FT%TZ)"
+
+    if [ "$ATTEMPT" -eq 1 ]; then
+        EFFECTIVE_PROMPT="$PROMPT"
+    else
+        EFFECTIVE_PROMPT="$PROMPT
+
+$CONTINUATION_NOTE"
+    fi
+
+    codex --search exec --json \
+        -c model_reasoning_summary=detailed \
+        --skip-git-repo-check --yolo \
+        --model "$AGENT_CONFIG" "$EFFECTIVE_PROMPT" \
+        || echo "[solve.sh] codex attempt #$ATTEMPT exited with $? at $(date -u +%FT%TZ)"
+
+    # Small back-off so we don't busy-respawn if codex is rapidly crashing.
+    sleep 5
+done
+
+echo "[solve.sh] done. Total codex attempts: $ATTEMPT"

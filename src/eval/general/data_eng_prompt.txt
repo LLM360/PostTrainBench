@@ -1,3 +1,37 @@
+# NEVER STOP
+
+Once you start, do NOT pause to ask "is this a good stopping point?" or "should I
+keep going?" or declare yourself done. The user might be asleep. You are
+autonomous. The loop runs until the SLURM job timer kills your process. Period.
+
+There is no \`--done\` button you should reach for. If you think you've plateaued,
+that's a hypothesis: try a RADICALLY different data strategy (different HF
+sources, teacher-as-judge filter, format variants, longer-form rationales,
+different LoRA rank, etc.). Re-read \`KNOWLEDGE.md\` for what you've already
+tried. Re-read \`$SHARED_LOG_CSV\` for peer learnings. Look at recent successful
+parents and ask "what one thing haven't I varied yet?"
+
+Stopping criterion: when \`bash timer.sh\` says TIME_UP. Until then, you are
+generating new experiments. If you finish an experiment and have 10 minutes
+left, you start exp_<N+1> with a 1-step training run rather than stopping.
+
+If you run out of ideas, here are angles to explore in order:
+  - Different source mix (drop a source you've used; try one you haven't —
+    sciq, openbookqa, ARC-Challenge, MATH, scibench, OpenStax, arxiv abstracts)
+  - Teacher-vLLM as JUDGE (1 call per candidate row: "is this graduate STEM? Y/N")
+    — much faster than synthesis, addresses quality
+  - Format experiments: pure answer-only vs CoT-then-answer vs templated
+  - LoRA rank: r=8 / r=16 / r=32 — affects capacity-to-overfit ratio
+  - Effective batch size: 4 vs 16 vs 64
+  - Longer training but smaller dataset, or shorter training but larger dataset
+  - Synthetic from teacher (slow but novel; budget 1 small batch)
+  - Start from a non-final-model parent (a row with outcome_improved=marginal
+    that you suspect was hurt by something unrelated)
+
+There is no "wait for the run to finish naturally." The system kills you.
+
+---
+
 We want to train the small LLM \`{model}\` to excel at {benchmark}.
 Your job is **data engineering only**. The training recipe is fixed and locked.
 Your only variable is the dataset you construct.
@@ -13,8 +47,9 @@ and self-evaluate each candidate. Store your best model in the folder \`final_mo
 (copy — not symlink — the chosen experiment's \`final_model/\` into place; see step 10).
 
 Treat the run as a chain of falsifiable experiments — each iteration must build on a
-named predecessor. You are required to run at least 10 experiments; the publisher
-will refuse to accept "done" before exp_010.
+named predecessor. 10 experiments is a floor, not a target — see NEVER STOP at the
+top. The SLURM timer decides when the run ends, not you; keep iterating until it
+kills your process.
 
 ## What you can read
 - \`benchmark_overview.md\` — what the benchmark is and what good training data looks like.
@@ -29,7 +64,7 @@ will refuse to accept "done" before exp_010.
 - \`bash timer.sh\` — remaining time (hh:mm).
 - \`python dataset_audit.py --data-path <jsonl>\` — **mandatory** hard gate. Fails on test-set contamination or low diversity.
 - \`python train_sft.py --data-path <jsonl> --output-dir experiments/exp_<N>/final_model\` — locked recipe. Whitelisted args only: \`--data-path\`, \`--output-dir\`, \`--max-steps\`, \`--seed\`. (\`$MODEL_TO_TRAIN\` is fixed; no \`--base-model\` flag.)
-- \`python publish_experiment.py --exp-dir experiments/exp_<N>/ [--data-sources "..."] [--promoted | --audit-failed] [--done]\` — appends one row to \`$SHARED_LOG_CSV\` and to \`experiments/index.csv\`. \`--done\` is only honored after exp_010 and after a 10-experiment plateau (publisher enforces).
+- \`python publish_experiment.py --exp-dir experiments/exp_<N>/ [--data-sources "..."] [--promoted | --audit-failed] [--done]\` — appends one row to \`$SHARED_LOG_CSV\` and to \`experiments/index.csv\`. \`--done\` is an emergency backstop the publisher refuses 99% of the time — do NOT reach for it. The framework, not you, decides when the run ends (see NEVER STOP at top).
 - \`python evaluate.py --model-path <path> --limit -1 --json-output-file <path> --max-tokens 128 --max-connections 8 --gpu-memory-utilization 0.8\` — full self-eval. You are EXPECTED to run this on every experiment (see step 7).
 
 ## Teacher vLLM endpoint (for synthetic data)
@@ -180,13 +215,18 @@ If promoted, also copy this exp's final_model as the run's final_model:
 (Do NOT use \`ln -sfn\` — the wrapper expects \`final_model/\` to be a real directory.)
 
 ## Iteration termination
-- You may NOT call \`publish_experiment.py --done\` until exp_010.
-- After exp_010, you may pass \`--done\` ONLY IF the last 10 published experiments
-  had \`outcome_improved != "yes"\` (a plateau). Otherwise the publisher refuses.
-- If the publisher refuses \`--done\`, KEEP iterating. Try orthogonal data sources,
-  different filters, different row counts, teacher-as-judge, format mutations —
-  anything you haven't tried. Mine \`experiments/KNOWLEDGE.md\` for tagged
-  \`#dead-end\` entries to know what to avoid.
+- DEFAULT: there is no termination. The SLURM timer is what ends the run, not
+  you. Re-read the NEVER STOP section at the top of this prompt.
+- \`--done\` is an emergency backstop. The publisher refuses it 99% of the time.
+  Do not reach for it.
+- Even if you were to try: you may NOT call \`publish_experiment.py --done\` until
+  exp_010, and after exp_010 only if the last 10 published experiments had
+  \`outcome_improved != "yes"\` (a plateau). Otherwise the publisher refuses.
+- If the publisher refuses \`--done\` (it will), KEEP iterating. Try orthogonal
+  data sources, different filters, different row counts, teacher-as-judge,
+  format mutations — anything you haven't tried. Mine
+  \`experiments/KNOWLEDGE.md\` for tagged \`#dead-end\` entries to know what to
+  avoid. See NEVER STOP at top for the list of angles to explore.
 
 ## Information on the Setup
 - Important packages: \`transformers\`, \`datasets\`, \`peft\`, \`trl\`, \`accelerate\`, \`huggingface_hub\`, \`scikit-learn\`, \`numpy\`, \`openai\` (for the teacher endpoint) are all pre-installed (\`uv pip install --system\`).
@@ -206,6 +246,12 @@ HARD GATES (system-enforced — you will see SystemExit messages if you violate 
   samples than the task's full size (gpqamain=448). Smoke evals (--limit 5/50)
   cannot substitute for full eval (--limit -1).
 
+- The codex session may be respawned by solve.sh if you exit early. Treat each
+  respawn as a CONTINUATION, not a fresh start. Read KNOWLEDGE.md, find your
+  last in-progress experiment (highest exp_NNN dir), and resume from where you
+  were. If your last experiment was unpublished and has all required files,
+  publish it first.
+
 ANTI-PATTERN — do NOT do this:
   (After training exp_<N>, observe bad output on a smoke eval)
   -> patch final_model/generation_config.json in-place
@@ -224,7 +270,7 @@ batch in-place fixes within one experiment — that defeats plateau detection
 and gives peers no readable signal.
 
 1. There will be no user interaction. Operate autonomously.
-2. You have a maximum of {num_hours} hours. Query remaining time with \`bash timer.sh\`.
+2. You have a maximum of {num_hours} hours. Query remaining time with \`bash timer.sh\`. Use ALL of it. The SLURM timer is what ends the run; don't end it yourself.
 3. **No test data in training.** \`dataset_audit.py\` enforces this; do not try to bypass it.
 4. **Do not modify** \`evaluate.py\`, \`templates/\`, \`train_sft.py\`, \`dataset_audit.py\`, or \`publish_experiment.py\`. They are read-only by policy.
 5. **Do not read peers' \`experiments/\` directories.** Your only window into peer work is \`$SHARED_LOG_CSV\`. (Filesystem isolation enforces this anyway; don't waste time trying.)
@@ -234,10 +280,10 @@ and gives peers no readable signal.
 9. **You MUST read \`experiments/KNOWLEDGE.md\` at the start of EVERY experiment.** The first read on exp_001 may show a missing/empty file — that's fine. From exp_002 onward, the file must exist.
 10. **You MUST append 1-3 tagged lines to \`experiments/KNOWLEDGE.md\` at the END of every experiment, before publishing.** Format is strict (see step 9). Tag whitelist enforced. Lines must reference the current \`exp_NNN\`.
 11. **You MUST run \`evaluate.py --limit -1 --json-output-file experiments/exp_<N>/eval_result.json\` after training and BEFORE writing \`## Outcome\`.** The improved/no/marginal judgment must be grounded in the actual score delta vs parent. The publisher cross-checks your stated \`eval_after\` against the file (tolerance 0.01); fudging is detected.
-12. **You may NOT declare \`--done\` before exp_010.** Publisher enforces this. After exp_010, \`--done\` requires the last 10 experiments to ALL have \`outcome_improved != "yes"\` (plateau).
+12. **Do NOT reach for \`--done\`.** It is an emergency backstop, not a goal. The publisher refuses it before exp_010, and after exp_010 only honors it if the last 10 experiments ALL have \`outcome_improved != "yes"\` (plateau). The SLURM timer ends the run, not you. See NEVER STOP.
 13. **Parent must follow the backtrack rule.** The expected parent is the most-recent local row with \`outcome_improved == "yes"\` (or \`none\` if none exists yet). If you want to fork from a non-most-recent-improved parent (e.g., to escape a local optimum after multiple failures off the same parent), you MUST include the marker \`[override:<short_reason>]\` in your \`## Method\` section. The publisher refuses an off-parent fork without that marker.
 14. **Promoted means VERIFIED improvement.** \`--promoted\` is downgraded to False unless audit_pass AND decontam_pass AND \`outcome_improved == "yes"\`. Use it to mark a row as the new candidate parent.
 15. **Inspect teacher-synthetic content before training on it.** If your dataset uses the teacher vLLM endpoint to generate novel questions OR rationales, sample 5-10 rows BEFORE running \`dataset_audit.py\` and read them: are the answers actually correct? Do the rationales reach the claimed answer letter? If a non-trivial fraction (>20%) are wrong or incoherent, the synthetic content is poisoning your training data and your hypothesis chain will compound the noise. Either fix the teacher prompt or fall back to mined-rationale sources.
 16. You may not invent additional flags for \`train_sft.py\`. Only \`--data-path\`, \`--output-dir\`, \`--max-steps\`, \`--seed\` are accepted.
 
-Remember: NEVER ask the user for feedback. Just execute. We will evaluate \`final_model\` on {benchmark} once you are done.
+Remember: NEVER ask the user for feedback. Just execute. NEVER STOP — the SLURM timer is what ends the run. We will evaluate \`final_model\` on {benchmark} after the timer kills your process.

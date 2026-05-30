@@ -70,6 +70,18 @@ TASK_FULL_SAMPLE_COUNT = {
 }
 DEFAULT_MIN_FULL_EVAL_SAMPLES = 200  # used when task not in table
 
+# V4: SOURCE-NOVELTY GATE cadence. Every Nth experiment (exp_id index a
+# multiple of this constant: exp_005, exp_010, ...) must introduce at
+# least one data source this run has never used before. Tunable here.
+SOURCE_NOVELTY_EVERY = 5
+
+# V4: EVAL-TOKEN GUARD floor. The benchmark harness runs
+# multiple_choice(cot=True) with --max-tokens 16000 and REWARDS reasoning.
+# If we can prove the agent's self-eval was run with a generation budget
+# smaller than this, the eval forbade reasoning and is invalid — refuse.
+# Closes the V3 bug where the agent self-eval'd with --max-tokens 128.
+MIN_EVAL_MAX_TOKENS = 4096
+
 SHARED_FIELDS = [
     "agent_id",
     "cluster_id",
@@ -847,6 +859,204 @@ def _check_eval_used_full_dataset(eval_result_path: Path, task_name: str | None)
         )
 
 
+# V4: SOURCE-NOVELTY GATE -------------------------------------------------
+def _parse_sources(raw: str) -> set[str]:
+    """Split a data_sources string into a set of normalized source tokens.
+
+    Comma-split, trimmed, lowercased. Empty tokens are dropped. Shared by
+    the current experiment's --data-sources arg and the prior shared rows.
+    """
+    if not raw:
+        return set()
+    return {tok.strip().lower() for tok in raw.split(",") if tok.strip()}
+
+
+def _collect_seen_sources(shared_path: str | None) -> set[str]:
+    """Union of every prior row's data_sources across the shared CSV.
+
+    This is the run-wide "what has already been tried" set. We read all
+    prior rows (any agent, any exp) and accumulate their source tokens.
+    """
+    seen: set[str] = set()
+    if not shared_path:
+        return seen
+    for row in _read_csv_rows(Path(shared_path)):
+        seen |= _parse_sources(row.get("data_sources") or "")
+    return seen
+
+
+def _check_source_novelty(
+    exp_n: int,
+    current_sources: set[str],
+    shared_path: str | None,
+    *,
+    audit_failed: bool,
+) -> None:
+    """V4 SOURCE-NOVELTY GATE: force a fresh data source every Nth experiment.
+
+    RULE: when exp_n is a non-zero multiple of SOURCE_NOVELTY_EVERY
+    (exp_005, exp_010, exp_015, ...), at least one of this experiment's
+    data_sources must NOT already appear in the run-wide "seen sources"
+    set (the union of all prior shared-CSV rows' data_sources). This forces
+    the agent to periodically broaden the data distribution rather than
+    endlessly re-permuting the same sources.
+
+    Exemptions:
+    - --audit-failed rows (no real dataset to diversify).
+    - exp_001 (no priors — always exempt; also not a multiple of 5).
+    - Any exp_n that is not a multiple of SOURCE_NOVELTY_EVERY.
+    """
+    if audit_failed:
+        return
+    if exp_n <= 1:
+        return
+    if SOURCE_NOVELTY_EVERY <= 0 or (exp_n % SOURCE_NOVELTY_EVERY) != 0:
+        return
+
+    seen = _collect_seen_sources(shared_path)
+    novel = current_sources - seen
+    if not novel:
+        seen_list = sorted(seen) or ["(none)"]
+        cur_list = sorted(current_sources) or ["(none)"]
+        raise SystemExit(
+            f"\n[publish V4 SOURCE-NOVELTY GATE] Refusing to publish exp_{exp_n:03d}: "
+            f"every {SOURCE_NOVELTY_EVERY}th experiment must introduce at least one "
+            "data source this run has NEVER used.\n"
+            f"  This experiment's sources: {cur_list}\n"
+            f"  Already-seen sources this run: {seen_list}\n"
+            "  None of this experiment's sources are new. To satisfy the gate:\n"
+            "    - run 'python3 discover_datasets.py' to find a new HF source "
+            "(it auto-excludes anything mentioning 'gpqa'), OR\n"
+            "    - run 'python3 teacher_synth.py --mode generate' to synthesize "
+            "a fresh source, then\n"
+            "  rebuild data.jsonl mixing in that new source and re-publish with "
+            "the new source listed in --data-sources.\n"
+        )
+    print(
+        f"[publish V4] source-novelty gate satisfied for exp_{exp_n:03d}: "
+        f"new source(s) {sorted(novel)}.",
+        file=sys.stderr,
+    )
+
+
+# V4: EVAL-TOKEN GUARD ----------------------------------------------------
+def _extract_eval_max_tokens(data: dict) -> int | None:
+    """Best-effort extraction of the generation max_tokens from an
+    inspect_ai eval_result.json.
+
+    Probes several common locations across inspect_ai versions:
+      - top-level 'max_tokens'
+      - eval.model_args.max_tokens
+      - eval.config.max_tokens / eval.config.max_connections (max_tokens only)
+      - plan/solver config: plan.steps[*].params.max_tokens (and
+        plan.config.max_tokens), or a top-level 'config'.
+    Returns the int value if found, else None (caller treats None as
+    "unknown" — warn, do not refuse).
+    """
+    def _coerce(v) -> int | None:
+        if isinstance(v, bool):  # bool is a subclass of int — reject
+            return None
+        if isinstance(v, int):
+            return v
+        if isinstance(v, float):
+            return int(v)
+        if isinstance(v, str):
+            try:
+                return int(float(v.strip()))
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    # Top-level.
+    top = _coerce(data.get("max_tokens"))
+    if top is not None:
+        return top
+
+    eval_block = data.get("eval")
+    if isinstance(eval_block, dict):
+        for sub_key in ("model_args", "config"):
+            sub = eval_block.get(sub_key)
+            if isinstance(sub, dict):
+                got = _coerce(sub.get("max_tokens"))
+                if got is not None:
+                    return got
+
+    # Top-level config block (some versions hoist generation config here).
+    cfg = data.get("config")
+    if isinstance(cfg, dict):
+        got = _coerce(cfg.get("max_tokens"))
+        if got is not None:
+            return got
+
+    # Plan / solver config: plan.config.max_tokens or
+    # plan.steps[*].params.max_tokens.
+    plan = data.get("plan")
+    if isinstance(plan, dict):
+        pcfg = plan.get("config")
+        if isinstance(pcfg, dict):
+            got = _coerce(pcfg.get("max_tokens"))
+            if got is not None:
+                return got
+        steps = plan.get("steps")
+        if isinstance(steps, list):
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                params = step.get("params")
+                if isinstance(params, dict):
+                    got = _coerce(params.get("max_tokens"))
+                    if got is not None:
+                        return got
+    return None
+
+
+def _check_eval_max_tokens(eval_result_path: Path) -> None:
+    """V4 EVAL-TOKEN GUARD: refuse evals run with too small a generation budget.
+
+    Reads eval_result.json and best-effort extracts the generation
+    max_tokens. If a value is found AND it is < MIN_EVAL_MAX_TOKENS, the
+    eval forbade the chain-of-thought reasoning that the cot=True harness
+    rewards — refuse. If max_tokens cannot be determined, emit a stderr
+    WARNING but DO NOT refuse (conservative, like the sample-count check):
+    we don't want a new false-refusal failure mode for inspect_ai JSON
+    shapes we don't recognize.
+    """
+    if not eval_result_path.is_file():
+        return
+    try:
+        data = json.loads(eval_result_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        print(
+            f"[publish V4] WARNING: could not read {eval_result_path} to verify "
+            f"eval max_tokens: {exc}; allowing without the token guard.",
+            file=sys.stderr,
+        )
+        return
+
+    max_tokens = _extract_eval_max_tokens(data)
+    if max_tokens is None:
+        print(
+            f"[publish V4] WARNING: couldn't determine generation max_tokens from "
+            f"{eval_result_path}; allowing but cannot confirm reasoning had room. "
+            f"Ensure evaluate.py ran with --max-tokens 16000.",
+            file=sys.stderr,
+        )
+        return
+
+    if max_tokens < MIN_EVAL_MAX_TOKENS:
+        raise SystemExit(
+            f"\n[publish V4 EVAL-TOKEN GUARD] Refusing to publish: eval was run "
+            f"with max_tokens={max_tokens} which is too small for cot=True "
+            f"reasoning (need >= {MIN_EVAL_MAX_TOKENS}); re-run evaluate.py with "
+            "--max-tokens 16000.\n"
+        )
+    print(
+        f"[publish V4] eval-token guard satisfied: eval max_tokens={max_tokens} "
+        f"(>= {MIN_EVAL_MAX_TOKENS}).",
+        file=sys.stderr,
+    )
+
+
 def _extract_accuracy(data: dict) -> float | None:
     """Best-effort accuracy extraction from an evaluate.py JSON dump.
 
@@ -1077,6 +1287,15 @@ def main() -> int:
 
     parent_value = validate_parent(exp_dir, sections, local_idx, shared_path)
 
+    # V4: SOURCE-NOVELTY GATE. Parse this experiment's data_sources and,
+    # on every SOURCE_NOVELTY_EVERY-th experiment, require at least one
+    # source not yet seen across the run's shared CSV. Audit-failed rows
+    # and exp_001 are exempt (handled inside _check_source_novelty).
+    current_sources = _parse_sources(args.data_sources)
+    _check_source_novelty(
+        exp_n, current_sources, shared_path, audit_failed=args.audit_failed
+    )
+
     # V2: parse and validate the structured ## Outcome section.
     outcome = _validate_outcome_section(
         sections, audit_failed=args.audit_failed, exp_n=exp_n
@@ -1084,6 +1303,14 @@ def main() -> int:
     outcome_improved = outcome.get("improved", "") if outcome else ""
     outcome_eval_before = outcome.get("eval_before", "") if outcome else ""
     outcome_eval_after = outcome.get("eval_after", "") if outcome else ""
+
+    # V4: EVAL-TOKEN GUARD. Closes the V3 bug at the publisher level: if
+    # eval_result.json proves the self-eval ran with a generation budget
+    # smaller than MIN_EVAL_MAX_TOKENS, reasoning was forbidden and the
+    # eval is invalid. Runs whenever the file exists (independent of the
+    # ## Outcome block), since it's a property of the eval run itself.
+    if eval_result_path.is_file():
+        _check_eval_max_tokens(eval_result_path)
 
     # V2: cross-check stated eval scores against eval_result.json on disk.
     if outcome:

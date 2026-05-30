@@ -73,6 +73,11 @@ if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ]; then
     cp src/eval/general/train_sft.py "${JOB_DIR}/task/"
     cp src/eval/general/dataset_audit.py "${JOB_DIR}/task/"
     cp src/eval/general/publish_experiment.py "${JOB_DIR}/task/"
+    # V4: reasoning-distillation helpers (dataset discovery, teacher judge,
+    # teacher synthesis). Copied alongside the locked recipe scripts.
+    cp src/eval/general/discover_datasets.py "${JOB_DIR}/task/"
+    cp src/eval/general/teacher_judge.py "${JOB_DIR}/task/"
+    cp src/eval/general/teacher_synth.py "${JOB_DIR}/task/"
     mkdir -p "${JOB_DIR}/task/experiments"
 fi
 
@@ -380,6 +385,17 @@ if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ] && [ -d "${JOB_DIR}/task/e
             if [ -f "$exp_dir/$fname" ]; then
                 cp "$exp_dir/$fname" "$EVAL_DIR/experiment_notes/$exp_name/$fname"
             fi
+        done
+        # V4: the DATASET the agent built and the SCRIPTS/RECIPE that built
+        # it are first-class deliverables (insights > GPQA number). Preserve
+        # them for EVERY experiment, not just promoted ones — failed
+        # strategies and their data are insight too. data.jsonl is small
+        # (~MBs); *.py captures the mining/synthesis recipe.
+        if [ -f "$exp_dir/data.jsonl" ]; then
+            cp "$exp_dir/data.jsonl" "$EVAL_DIR/experiment_notes/$exp_name/data.jsonl"
+        fi
+        for pyf in "$exp_dir"/*.py; do
+            [ -f "$pyf" ] && cp "$pyf" "$EVAL_DIR/experiment_notes/$exp_name/"
         done
     done
     echo "Saved experiment notes to: $EVAL_DIR/experiment_notes"

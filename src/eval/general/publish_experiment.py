@@ -1614,19 +1614,33 @@ def main() -> int:
     # agent's own ## Outcome eval_after string is still what populates the
     # eval_after column).
     #
-    # Backward compat: when no validated file-backed seed is found, fall back
-    # to the single ## Outcome eval_after the agent stated (n=1, std=0.0).
     # The legacy single-seed publish path is unchanged: the lone canonical
     # eval_result.json is auto-globbed, validated identically, and yields
     # mean=its score / std=0.0 / n=1.
+    #
+    # Review #8 follow-up: when NO validated, file-backed seed exists we do
+    # NOT fall back to the agent's free-text ## Outcome eval_after for the
+    # promotion mean. An unverified notes value must not be able to satisfy
+    # the promotion margin via the back door (the same class of hole as raw
+    # --eval-after). seed_scores stays empty -> compute_seed_stats ->
+    # eval_after_mean=None / n=0 -> passes_promotion_margin=False -> any stated
+    # improved:yes is downgraded to no below and effective_promoted is False.
+    # The ## Outcome eval_after still populates the display-only eval_after
+    # column unchanged; it just cannot drive promotion.
     seed_scores, seed_sources = collect_eval_seed_scores(
         exp_dir, args.eval_results, task_name
     )
     if not seed_scores:
         legacy = _to_float_or_none(outcome_eval_after)
         if legacy is not None:
-            seed_scores = [legacy]
-            seed_sources = ["<## Outcome eval_after (no file-backed seed)>"]
+            print(
+                "[publish V4] NOTE: no validated eval_result*.json found; the "
+                f"## Outcome eval_after={legacy} is DISPLAY-ONLY and will NOT "
+                "feed eval_after_mean / outcome_improved / promoted. Provide a "
+                "full-dataset eval_result.json (>= MIN_EVAL_MAX_TOKENS) to make "
+                "this experiment promotable.",
+                file=sys.stderr,
+            )
     # PROVENANCE: log exactly which files (or the legacy fallback) feed the
     # mean so a reviewer can audit what evidence the promotion verdict rests
     # on without a schema change.

@@ -24,7 +24,7 @@ Treat the run as a chain of falsifiable experiments — each iteration must buil
 - \`python dataset_audit.py --data-path <jsonl>\` — **mandatory** hard gate. Fails on test-set contamination or low diversity.
 - \`python train_sft.py --data-path <jsonl> --output-dir experiments/exp_<N>/final_model\` — locked recipe. Whitelisted args only: \`--data-path\`, \`--output-dir\`, \`--max-steps\`, \`--seed\`. (\`$MODEL_TO_TRAIN\` is fixed; no \`--base-model\` flag.)
 - \`python publish_experiment.py --exp-dir experiments/exp_<N>/ [--data-sources "..."] [--promoted | --audit-failed]\` — appends one row to \`$SHARED_LOG_CSV\` and to \`experiments/index.csv\`.
-- \`python evaluate.py --model-path <path> --limit 5 --max-tokens 512\` — small qualitative probe. **Do not use this to optimize against the test set.** Delete the resulting metrics file before publishing so it never enters the archive.
+- \`bash eval.sh --model-path <path> --limit 5 --max-tokens 512\` — small qualitative probe. **Always invoke the scorer via \`bash eval.sh\` (a thin wrapper that forwards all args to \`evaluate.py\`); calling \`python evaluate.py\` directly loses \`/opt/env/local/bin\` from PATH under codex's \`bash -lc\` and you'll hit \`vllm: command not found\`.** **Do not use this to optimize against the test set.** Delete the resulting metrics file before publishing so it never enters the archive.
 
 ## Teacher vLLM endpoint (for synthetic data)
 An OpenAI-compatible endpoint is available:
@@ -81,8 +81,8 @@ For each experiment exp_<N>:
 5. **TRAIN.** \`python train_sft.py --data-path experiments/exp_<N>/data.jsonl --output-dir experiments/exp_<N>/final_model\`.
 
 6. **PROBE & WRITE CONCLUSION.** Two-tier probe:
-   - **Format probe (n=5, ~30s):** \`python evaluate.py --model-path experiments/exp_<N>/final_model --limit 5 --max-tokens 512 --json-output-file /tmp/format_probe.json\`. Read the inspect_ai log to inspect generation length and whether it stops cleanly after \`ANSWER: X\`.
-   - **Quality probe (n=30, ~3 min):** ONLY if format probe shows clean stopping. \`python evaluate.py --model-path experiments/exp_<N>/final_model --limit 30 --max-tokens 1500 --json-output-file /tmp/quality_probe.json\`. Read the inspect_ai per-sample completions to see if the model is reasoning or guessing. n=30 is the smallest sample that lets you observe behavioral differences reliably; n=5 is essentially noise.
+   - **Format probe (n=5, ~30s):** \`bash eval.sh --model-path experiments/exp_<N>/final_model --limit 5 --max-tokens 512 --json-output-file /tmp/format_probe.json\`. Read the inspect_ai log to inspect generation length and whether it stops cleanly after \`ANSWER: X\`.
+   - **Quality probe (n=30, ~3 min):** ONLY if format probe shows clean stopping. \`bash eval.sh --model-path experiments/exp_<N>/final_model --limit 30 --max-tokens 1500 --json-output-file /tmp/quality_probe.json\`. Read the inspect_ai per-sample completions to see if the model is reasoning or guessing. n=30 is the smallest sample that lets you observe behavioral differences reliably; n=5 is essentially noise.
    Update \`## Conclusion\` in notes.md based on what you observed. **Do not write numeric scores** — describe behavior. Delete both probe files (\`rm -f /tmp/format_probe.json /tmp/quality_probe.json\`) and any inspect_ai logs they produced so they don't leak into the archive.
 
 7. **PUBLISH.** \`python publish_experiment.py --exp-dir experiments/exp_<N>/ [--data-sources "<hf_id1>,<hf_id2>,synthetic"] [--promoted | --audit-failed]\`. Promoted means you've copied this exp's final_model as the run's final_model: \`rm -rf final_model && cp -r experiments/exp_<N>/final_model final_model\`. (Do NOT use \`ln -sfn\` — the wrapper expects \`final_model/\` to be a real directory.)

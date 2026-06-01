@@ -117,6 +117,12 @@ The build flow is **DISCOVER -> JUDGE -> SYNTHESIZE**:
    A trace whose \`</think>\` never closes (or that has no A-D letter) is REJECTED and
    retried ONCE, then SKIPPED — never wrapped/repaired into a fake block, so a dropped
    row is fine.
+   THROUGHPUT: the teacher is served by vLLM, which does CONTINUOUS BATCHING — it
+   generates MANY concurrent requests in bulk, far faster than one-at-a-time. Distillation
+   is this run's main time sink, so SATURATE the server: raise --max-workers (e.g. 24-48,
+   not the default 8) once you have hundreds-to-thousands of seeds — vLLM batches them
+   server-side, you are NOT limited to near-sequential calls. Back off only if you see
+   HTTP timeouts/5xx from the endpoint.
    \`\`\`bash
    # RATIONALE mode (default) — distill teacher CoT onto your mined MCQ rows.
    # Output rows are train_sft-ready: user = MCQ in the exact eval template,

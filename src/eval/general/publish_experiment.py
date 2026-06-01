@@ -43,13 +43,23 @@ Schema history:
        >=10-experiment floor and 10-experiment plateau. effective_promoted
        additionally requires outcome_improved == "yes".
 - v5 (V4 multi-seed promotion margin): multiple eval seeds are accepted
-       (repeatable --eval-after, --eval-results list, or auto-glob of
-       eval_result*.json in the exp dir). New columns: eval_after_mean,
-       eval_after_std, n_eval_seeds. A candidate is outcome_improved=yes /
-       effective_promoted ONLY when eval_after_mean beats the incumbent
-       (eval_before) by more than max(PROMOTION_MARGIN_FLOOR,
+       (--eval-results list or auto-glob of eval_result*.json in the exp dir).
+       New columns: eval_after_mean, eval_after_std, n_eval_seeds. A candidate
+       is outcome_improved=yes / effective_promoted ONLY when eval_after_mean
+       beats the incumbent (eval_before) by more than max(PROMOTION_MARGIN_FLOOR,
        PROMOTION_STD_K * eval_after_std) — both env-overridable. Single
        eval_after still works (mean=value, std=0.0, n=1).
+- v5.1 (multi-seed evidence hardening, PR #8): EVERY eval_result*.json that
+       contributes to eval_after_mean is now validated with the SAME guards
+       V4 applied only to the canonical eval_result.json — full-dataset sample
+       count, generation max_tokens >= MIN_EVAL_MAX_TOKENS, and a parseable
+       accuracy field. A smoke / low-token / malformed / old-shape seed file
+       fails loud and can NEVER move the mean. Raw --eval-after floats are no
+       longer file-backable evidence and are DROPPED from the promotion path:
+       they are display-only and do not feed eval_after_mean / outcome_improved
+       / promoted. The contributing file paths are logged (eval_sources
+       provenance line) so a reviewer can audit what evidence the verdict
+       rests on. No column / schema change (still schema_version=5).
 """
 from __future__ import annotations
 
@@ -290,12 +300,12 @@ def parse_args() -> argparse.Namespace:
             "AND the last 10 outcomes all != 'yes' (plateau). Refused otherwise."
         ),
     )
-    # V4 multi-seed promotion. Any combination of the two flags below is
-    # merged with an auto-glob of eval_result*.json in --exp-dir. The union of
-    # all discovered accuracies forms the seed set used for eval_after_mean /
-    # eval_after_std / n_eval_seeds and the promotion-margin check. With none
-    # of them supplied (and a single eval_result.json present, the legacy
-    # path), n=1 / std=0.0 / mean=the single score — fully backward compatible.
+    # V4 multi-seed promotion. The seed set that feeds eval_after_mean /
+    # eval_after_std / n_eval_seeds and the promotion-margin check is built
+    # ONLY from validated, file-backed evals: --eval-results plus an auto-glob
+    # of eval_result*.json in --exp-dir. With none supplied (and a single
+    # eval_result.json present, the legacy path), n=1 / std=0.0 / mean=the
+    # single validated score — fully backward compatible.
     p.add_argument(
         "--eval-after",
         action="append",
@@ -303,9 +313,10 @@ def parse_args() -> argparse.Namespace:
         default=None,
         metavar="ACC",
         help=(
-            "A per-seed eval accuracy (float). Repeat for multiple seeds, "
-            "e.g. --eval-after 0.31 --eval-after 0.29. Merged with "
-            "--eval-results and any auto-globbed eval_result*.json."
+            "DISPLAY-ONLY per-seed eval accuracy (float). NOTE: as of PR #8 "
+            "raw --eval-after floats DO NOT feed eval_after_mean / promotion "
+            "(unverified, not file-backed). To contribute a validated seed, "
+            "pass its eval_result*.json via --eval-results instead."
         ),
     )
     p.add_argument(
@@ -314,8 +325,10 @@ def parse_args() -> argparse.Namespace:
         metavar="PATHS",
         help=(
             "Comma- or whitespace-separated list of eval_result*.json files "
-            "(one per seed). Each is parsed for its accuracy. Merged with "
-            "--eval-after and any auto-globbed eval_result*.json in --exp-dir."
+            "(one per seed). EACH is fully validated (full-dataset sample "
+            "count, max-tokens, parseable accuracy) before its accuracy "
+            "contributes to eval_after_mean. Merged with any auto-globbed "
+            "eval_result*.json in --exp-dir. A non-comparable file fails loud."
         ),
     )
     return p.parse_args()
@@ -1198,56 +1211,97 @@ def _split_path_list(raw: str | None) -> list[str]:
     return [tok for tok in re.split(r"[,\s]+", raw.strip()) if tok]
 
 
-def _accuracy_from_eval_file(path: Path) -> float | None:
-    """Read an eval_result*.json and return its accuracy, or None.
+def validate_eval_file(eval_path: Path, task_name: str | None) -> float:
+    """Fully validate ONE eval_result*.json and return its grounded accuracy.
 
-    Missing/unreadable/unparseable files and files without a recognizable
-    accuracy field return None (caller decides whether that's fatal).
+    Applies the SAME guards V4 applies to the canonical eval_result.json,
+    so EVERY file that contributes to eval_after_mean is held to the same
+    full-comparable-evidence bar:
+
+    1. Readable + parseable JSON object (else: not full evidence → refuse).
+    2. Full-dataset sample count (_check_eval_used_full_dataset) — a smoke /
+       low-sample eval is refused.
+    3. Generation max_tokens >= MIN_EVAL_MAX_TOKENS (_check_eval_max_tokens)
+       — a low-token eval that forbade cot=True reasoning is refused.
+    4. A recognizable accuracy field (_extract_accuracy). An old/malformed
+       shape with no extractable accuracy is refused (it cannot ground a
+       promotion number).
+
+    Raises SystemExit (fail loud) on any of these so a non-comparable file
+    can NEVER silently affect the multi-seed mean. The sample-count and
+    token guards keep their own internal "couldn't determine → warn, don't
+    refuse" conservatism for unfamiliar inspect_ai shapes; what we add here
+    is that a file with NO extractable accuracy is always rejected.
     """
-    if not path.is_file():
-        return None
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        print(
-            f"[publish V4] WARNING: could not read eval result {path}: {exc}; "
-            "skipping this seed.",
-            file=sys.stderr,
+    if not eval_path.is_file():
+        raise SystemExit(
+            f"[publish V4 MULTI-SEED] eval result {eval_path} does not exist; "
+            "cannot use it as promotion evidence."
         )
-        return None
+    try:
+        data = json.loads(eval_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(
+            f"[publish V4 MULTI-SEED] eval result {eval_path} is not readable / "
+            f"parseable JSON ({exc}); it is not full comparable evidence and "
+            "must not contribute to eval_after_mean. Re-run evaluate.py to "
+            "regenerate it (or drop it from --eval-results)."
+        )
     if not isinstance(data, dict):
-        return None
-    return _extract_accuracy(data)
+        raise SystemExit(
+            f"[publish V4 MULTI-SEED] eval result {eval_path} is not a JSON "
+            "object (old/malformed shape); refusing to use it in the mean."
+        )
+
+    # Same full-dataset + token guards the canonical file gets. These raise
+    # SystemExit on a smoke / low-token eval.
+    _check_eval_used_full_dataset(eval_path, task_name)
+    _check_eval_max_tokens(eval_path)
+
+    acc = _extract_accuracy(data)
+    if acc is None:
+        raise SystemExit(
+            f"[publish V4 MULTI-SEED] eval result {eval_path} has no "
+            "recognizable accuracy field (old/malformed eval shape); refusing "
+            "to use it in eval_after_mean. Re-run evaluate.py with the current "
+            "harness so it writes a parseable accuracy."
+        )
+    return acc
 
 
 def collect_eval_seed_scores(
     exp_dir: Path,
-    cli_eval_after: list[float] | None,
     cli_eval_results: str | None,
-) -> list[float]:
-    """Collect per-seed eval accuracies from CLI flags + auto-globbed files.
+    task_name: str | None,
+) -> tuple[list[float], list[str]]:
+    """Collect FULLY-VALIDATED per-seed accuracies + their provenance.
 
-    Sources, unioned (de-dup is intentionally NOT applied — two seeds can
-    legitimately produce the same accuracy and both should count toward n):
-    1. --eval-after floats (repeatable).
-    2. --eval-results paths (comma/space list of eval_result*.json), parsed
-       for their accuracy via _extract_accuracy.
-    3. Auto-glob of <exp_dir>/eval_result*.json (the canonical single-file
-       eval_result.json plus any eval_result_seedK.json siblings), parsed
-       the same way.
+    Only file-backed evals contribute to the mean, and every file is run
+    through validate_eval_file (full-dataset count, max-tokens, accuracy
+    extraction) so a smoke / low-token / malformed / old-shape file can
+    NEVER affect eval_after_mean (it fails loud instead).
 
-    Glob files explicitly named on --eval-results are not double-counted.
-    Returns the list of floats (possibly empty). The caller is responsible
-    for the legacy single-score fallback (## Outcome eval_after) when this
-    list is empty.
+    Raw --eval-after floats are NOT consulted here: they are not file-backed
+    and cannot be held to the score/full-sample/max-token checks, so they no
+    longer feed the promotion math (see main() — they remain available only
+    as a non-promotion display value via the ## Outcome eval_after column).
+
+    Sources, unioned (de-dup of identical accuracies is intentionally NOT
+    applied — two seeds can legitimately tie and both should count toward n;
+    the SAME on-disk file is de-duped so the auto-glob doesn't double-count
+    a path also named on --eval-results):
+    1. --eval-results paths (comma/space list of eval_result*.json).
+    2. Auto-glob of <exp_dir>/eval_result*.json (the canonical single-file
+       eval_result.json plus any eval_result_seedK.json siblings).
+
+    Returns (scores, sources) where sources is the list of contributing file
+    paths (provenance) parallel to scores. The caller handles the legacy
+    single-score fallback (## Outcome eval_after) only when scores is empty.
     """
     scores: list[float] = []
+    sources: list[str] = []
 
-    # 1. Explicit per-seed floats.
-    for v in (cli_eval_after or []):
-        scores.append(float(v))
-
-    # 2. Explicit per-seed files. Track resolved paths so the auto-glob below
+    # 1. Explicit per-seed files. Track resolved paths so the auto-glob below
     #    doesn't count the same file twice.
     explicit: set[Path] = set()
     for tok in _split_path_list(cli_eval_results):
@@ -1260,25 +1314,20 @@ def collect_eval_seed_scores(
             cand = p
         cand = cand.resolve()
         explicit.add(cand)
-        acc = _accuracy_from_eval_file(cand)
-        if acc is not None:
-            scores.append(acc)
-        else:
-            print(
-                f"[publish V4] WARNING: --eval-results entry {tok!r} "
-                f"({cand}) had no readable accuracy; skipping.",
-                file=sys.stderr,
-            )
+        # validate_eval_file fails loud on any non-comparable file.
+        acc = validate_eval_file(cand, task_name)
+        scores.append(acc)
+        sources.append(str(cand))
 
-    # 3. Auto-glob eval_result*.json in the exp dir.
+    # 2. Auto-glob eval_result*.json in the exp dir.
     for p in sorted(exp_dir.glob("eval_result*.json")):
         if p.resolve() in explicit:
             continue
-        acc = _accuracy_from_eval_file(p)
-        if acc is not None:
-            scores.append(acc)
+        acc = validate_eval_file(p, task_name)
+        scores.append(acc)
+        sources.append(str(p))
 
-    return scores
+    return scores, sources
 
 
 def compute_seed_stats(scores: list[float]) -> tuple[float | None, float, int]:
@@ -1544,19 +1593,57 @@ def main() -> int:
     outcome_eval_before = outcome.get("eval_before", "") if outcome else ""
     outcome_eval_after = outcome.get("eval_after", "") if outcome else ""
 
-    # V4: MULTI-SEED. Gather every per-seed accuracy we can see (repeatable
-    # --eval-after, --eval-results list, and auto-globbed eval_result*.json),
-    # then summarize into mean/std/n. Backward compat: when no seed signal is
-    # found via the new sources, fall back to the single ## Outcome eval_after
-    # the agent stated (n=1, std=0.0). This keeps every existing single-seed
-    # publish flow working unchanged while letting newer flows supply seeds.
-    seed_scores = collect_eval_seed_scores(
-        exp_dir, args.eval_after, args.eval_results
+    # Resolve the benchmark task name once (used both by the multi-seed
+    # per-file validation below and by the canonical eval_result.json gate
+    # later) so every eval file is held to the SAME full-sample count.
+    task_name = os.environ.get("EVALUATION_TASK") or None
+    if task_name:
+        task_name = task_name.lower().strip()
+
+    # V4: MULTI-SEED. Gather every FILE-BACKED per-seed accuracy we can see
+    # (--eval-results list + auto-globbed eval_result*.json, INCLUDING the
+    # canonical eval_result.json), running EACH file through the SAME
+    # full-dataset / max-token / accuracy-extraction guards V4 applies to the
+    # canonical file. Any smoke, low-token, malformed, or old-shape file fails
+    # loud and can NEVER contribute to eval_after_mean.
+    #
+    # Raw --eval-after floats are deliberately NOT part of the promotion math:
+    # they are not file-backed and cannot be validated, so an unverified CLI
+    # number must not be able to satisfy the promotion margin. --eval-after
+    # is retained only as a non-promotion display value (logged below; the
+    # agent's own ## Outcome eval_after string is still what populates the
+    # eval_after column).
+    #
+    # Backward compat: when no validated file-backed seed is found, fall back
+    # to the single ## Outcome eval_after the agent stated (n=1, std=0.0).
+    # The legacy single-seed publish path is unchanged: the lone canonical
+    # eval_result.json is auto-globbed, validated identically, and yields
+    # mean=its score / std=0.0 / n=1.
+    seed_scores, seed_sources = collect_eval_seed_scores(
+        exp_dir, args.eval_results, task_name
     )
     if not seed_scores:
         legacy = _to_float_or_none(outcome_eval_after)
         if legacy is not None:
             seed_scores = [legacy]
+            seed_sources = ["<## Outcome eval_after (no file-backed seed)>"]
+    # PROVENANCE: log exactly which files (or the legacy fallback) feed the
+    # mean so a reviewer can audit what evidence the promotion verdict rests
+    # on without a schema change.
+    print(
+        f"[publish V4] eval_sources (n={len(seed_scores)}) contributing to "
+        f"eval_after_mean: {seed_sources or '(none)'}.",
+        file=sys.stderr,
+    )
+    if args.eval_after:
+        print(
+            "[publish V4] NOTE: --eval-after floats "
+            f"{args.eval_after} are display-only and DO NOT feed "
+            "eval_after_mean / outcome_improved / promoted (unverified, not "
+            "file-backed). Provide eval_result*.json via --eval-results to "
+            "contribute additional validated seeds.",
+            file=sys.stderr,
+        )
     eval_after_mean, eval_after_std, n_eval_seeds = compute_seed_stats(seed_scores)
     if n_eval_seeds > 1:
         print(
@@ -1615,11 +1702,11 @@ def main() -> int:
     if outcome:
         # V3: also refuse smoke evals — if eval_result.json reports fewer
         # samples than the task's full size, this isn't a valid plateau
-        # signal. Task name comes from $EVALUATION_TASK if set.
+        # signal. Task name (resolved once above) comes from $EVALUATION_TASK.
+        # NOTE: the canonical eval_result.json is also auto-globbed and run
+        # through validate_eval_file above (same guards), so this is the
+        # backward-compat duplicate; the checks are idempotent.
         if eval_result_path.is_file():
-            task_name = os.environ.get("EVALUATION_TASK") or None
-            if task_name:
-                task_name = task_name.lower().strip()
             _check_eval_used_full_dataset(eval_result_path, task_name)
         _check_eval_score_against_file(
             eval_result_path,

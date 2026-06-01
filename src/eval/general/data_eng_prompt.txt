@@ -9,6 +9,15 @@ Reasoning is REWARDED and needs token room. This single fact drives the whole
 strategy below: your headline lever is **distilling the teacher's reasoning**
 into your training data, NOT collecting answer-only rows.
 
+**THINKING-ONLY FORMAT (target shape for every assistant turn).** Every training
+row's assistant target is a single \`<think>...</think>\` reasoning block then exactly
+one final \`ANSWER: <LETTER>\` line — literally
+\`<think>\n{reasoning}\n</think>\n\nANSWER: X\`. The scorer takes the FIRST
+\`^ANSWER:\` match over the full completion, so the \`ANSWER:\` line MUST come AFTER
+\`</think>\` and must NOT appear anywhere inside the \`<think>\` block (a stray in-think
+\`ANSWER:\` gets scored instead and mis-grades the row — we scrub it upstream AND
+hard-gate it in the audit; see step 5).
+
 ## What "data engineering only" means here
 - You DO NOT modify training code, hyperparameters, or model architecture.
 - You DO build, mine, synthesize, filter, and dedupe the training dataset.
@@ -27,8 +36,12 @@ until it kills your process.
 ## DATA STRATEGY — distill reasoning, don't collect answers
 
 Your PRIMARY lever is **reasoning distillation**. Every training row's assistant
-turn should be a step-by-step reasoning chain that ENDS with a final line exactly
-\`ANSWER: <LETTER>\` (LETTER in A-D). That matches what the eval rewards.
+turn is THINKING-ONLY: a single \`<think>...</think>\` reasoning block then exactly
+one final line \`ANSWER: <LETTER>\` (LETTER in A-D). That matches what the eval
+rewards. Three HARD INVARIANTS per row (the audit hard-fails on a violation, step 5):
+(1) EXACTLY ONE \`ANSWER: <LETTER>\` line; (2) it comes AFTER \`</think>\`; (3) NO
+\`ANSWER:\` marker inside \`<think>\`. Keep the literal \`ANSWER:\` marker verbatim — do
+NOT rename it (renaming to \`answer line:\` collapsed exp_016 to ~0.13).
 
 **WARNING — answer-only data caps a reasoning benchmark.** If you train on rows
 whose assistant turn is just \`ANSWER: C\` (or just the letter, or a one-line
@@ -54,44 +67,102 @@ The build flow is **DISCOVER -> JUDGE -> SYNTHESIZE**:
    the candidates that look like graduate-level STEM MCQ, and load the question
    rows you want with the \`datasets\` library.
 
-2. **JUDGE** relevance/quality with the teacher as an LLM-as-judge. One tiny call
-   per row decides keep/reject, parallelized, so this is cheap:
+   **GO WIDE — now ENFORCED.** discover_datasets.py keeps a query log
+   (\`--query-log\`, default \`experiments/discovery_query_log.json\`) and REFUSES
+   (exit code 6) any \`--keywords\` whose normalized token set is too similar
+   (Jaccard > \`--max-query-similarity\`, default 0.6) to a query it already accepted.
+   If it refuses, it prints orthogonal axes and alternate sorts to try — VARY the
+   search, don't re-run the same one. A prior run wasted its budget re-querying ~8
+   near-duplicates and adopted only ~3% of what it surfaced, ignoring strong
+   top-ranked sets (e.g. ceval/ceval-exam). Don't repeat that. Concretely:
+   - Rotate the SUBJECT axis: astronomy, materials science, electrical/computer
+     engineering, organic chemistry, genetics — not just "physics chemistry biology".
+   - Rotate the FRAMING axis: non-MCQ sources you reformat into MCQ are fair game.
+   - Rotate \`--sort\` (trending / downloads / likes) so you don't keep seeing the
+     same head datasets.
+   - Then ACTUALLY ADOPT the strong surfaced candidates. Surfacing a top-ranked
+     dataset and then not loading it is the failure mode — feed promising ones
+     through JUDGE and SYNTHESIZE. \`--force\` exists to override the gate, but only
+     reach for it when you truly intend a deliberate re-run, not to dodge going wide.
+   This reinforces (does not replace) the source-novelty cadence in Rules: every
+   5th experiment still needs a brand-new \`--data-sources\` token.
+
+2. **JUDGE** relevance/quality with the teacher as an LLM-as-judge — USE THIS. A
+   deterministic source/topic list cannot tell a hard graduate-level MCQ from an
+   easy or off-topic one; only the judge can. One tiny call per row decides
+   keep/reject, parallelized, so this is cheap. Run it on mined candidates to
+   filter for relevance AND difficulty BEFORE you distill:
    \`\`\`bash
    python3 teacher_judge.py --in candidates.jsonl --out verdicts.jsonl \
      --batch 50 --max-workers 8 --filter-out-rejected \
+     --judge-max-tokens 3072 --max-unparseable-frac 0.4 \
      [--criterion "graduate-level STEM multiple-choice suitable for GPQA-style training"]
    # -> verdicts.jsonl.kept.jsonl has only kept rows, _judge_* keys stripped,
    #    schema-clean so it pipes straight into the next step.
    \`\`\`
+   The teacher emits a long \`<think>...</think>\` preamble before its JSON verdict.
+   The judge now strips that preamble and budgets \`--judge-max-tokens 3072\` (default)
+   so the JSON survives — the old 120-token budget made every verdict default to
+   keep=false and was abandoned. \`--max-unparseable-frac\` (default 0.4) is a safety
+   gate: if MORE than that fraction of replies still fail to parse (rows tagged
+   \`_judge_reason=__parse_failure__\`), teacher_judge.py EXITS 2 rather than silently
+   dropping everything — raise \`--judge-max-tokens\` and retry if you hit it. Don't
+   skip judging just because it once kept 0/1200; with these flags it works.
 
-3. **SYNTHESIZE / DISTILL** with the teacher. This is where reasoning gets added:
+3. **SYNTHESIZE / DISTILL** with the teacher. This is where reasoning gets added.
+   teacher_synth.py now emits the THINKING-ONLY shape
+   (\`<think>\n{reasoning}\n</think>\n\nANSWER: X\`) by DEFAULT for BOTH rationale and
+   generate modes — one closed \`<think>\` block then exactly one trailing \`ANSWER:\`
+   line, none inside the block. \`--max-tokens\` now defaults to 6144 (reasoning room).
+   A trace whose \`</think>\` never closes (or that has no A-D letter) is REJECTED and
+   retried ONCE, then SKIPPED — never wrapped/repaired into a fake block, so a dropped
+   row is fine.
    \`\`\`bash
    # RATIONALE mode (default) — distill teacher CoT onto your mined MCQ rows.
    # Output rows are train_sft-ready: user = MCQ in the exact eval template,
-   # assistant = step-by-step reasoning ending in 'ANSWER: X'.
+   # assistant = <think>...reasoning...</think> then a single 'ANSWER: X' line.
    python3 teacher_synth.py --mode rationale --in verdicts.jsonl.kept.jsonl \
      --out distilled.jsonl --max-workers 8
    # resume an interrupted batch (skips rows already in distilled.jsonl.partial):
    python3 teacher_synth.py --mode rationale --in verdicts.jsonl.kept.jsonl \
      --out distilled.jsonl --resume
 
-   # GENERATE mode — when discovery comes up dry, invent NOVEL graduate-level
-   # 4-option MCQs WITH reasoning (rotates 26 subfields to dodge the diversity audit):
+   # GENERATE mode — USE THIS to create NET-NEW difficulty-targeted MCQs, not just
+   # to re-solve mined items. Invents NOVEL graduate-level 4-option MCQs WITH
+   # reasoning (rotates 26 subfields to dodge the diversity audit):
    python3 teacher_synth.py --mode generate --n 200 \
      --topic "graduate physics/chemistry/biology" --out generated.jsonl --max-workers 8
-   # Knobs: --max-tokens 2048 (reasoning room) --temperature (0.2 rationale / 0.7
-   #        generate) --progress-every 10
+   # De-dup against an existing pool and disable the blind re-solve check if needed:
+   python3 teacher_synth.py --mode generate --n 200 --topic "..." \
+     --out generated.jsonl --avoid distilled.jsonl   # [--no-self-consistency]
+   # Knobs: --max-tokens 6144 (reasoning room, default) --temperature (0.2 rationale
+   #        / 0.7 generate) --progress-every 10
+   #        --max-seq-len 8192 (matches the trainer; tail-trims the <think> body only,
+   #        preserving the ANSWER line) --require-think/--no-require-think (default ON:
+   #        require a closed <think> block; leave ON for thinking-only training)
    \`\`\`
+   After synth, SPOT-CHECK 5-10 output rows by eye: each assistant turn must open
+   and close \`<think>\` EXACTLY once, with the single \`ANSWER: <LETTER>\` line strictly
+   AFTER \`</think>\` and no \`ANSWER:\` inside the block (see Rule 17).
    \`teacher_synth.py\` needs env \`TEACHER_VLLM_URL\`, \`TEACHER_MODEL_NAME\`,
-   \`TEACHER_API_KEY\`. RATIONALE mode is your bread-and-butter (re-solve mined
-   questions with full CoT); GENERATE mode is the escape hatch when discovery +
-   judge leave you with nothing relevant.
+   \`TEACHER_API_KEY\`. GENERATE mode now WORKS: it parses on an explicit
+   QUESTION/REASONING/ANSWER delimiter after stripping the teacher's
+   \`<think>...</think>\` preamble (the old "no JSON object found" failure is fixed),
+   and by default it SELF-CHECKS each item by blindly re-solving the question (using
+   the FULL \`--max-tokens\` 6144 reasoning budget so the re-solve isn't truncated) and
+   keeping it only if the blind letter matches the generated gold (self-consistency
+   is ON; \`--no-self-consistency\` disables it). \`--avoid <jsonl>\` drops generated
+   questions that duplicate an existing pool. RATIONALE mode (re-solve mined
+   questions with full CoT) is your bread-and-butter; GENERATE mode is no longer
+   just an escape hatch — reach for it to manufacture HARDER items in subfields your
+   mined data is thin on, or when discovery + judge leave you short on relevant rows.
 
 The combined output(s) are your \`data.jsonl\` (concatenate distilled / generated
 files as you see fit). The schema train_sft.py consumes is JSONL, one object per
 line: \`{"messages":[{"role":"user","content":str},{"role":"assistant","content":str}]}\`
 (an optional leading system message is allowed). The teacher_synth.py output is
-already in this shape with reasoning + \`ANSWER: X\`.
+already in this shape, with the assistant content as a \`<think>...</think>\` block
+then a single \`ANSWER: X\` line.
 
 ## What you can read
 - \`benchmark_overview.md\` — what the benchmark is and what good training data looks like.
@@ -107,7 +178,7 @@ already in this shape with reasoning + \`ANSWER: X\`.
 - \`python3 discover_datasets.py [...]\` — dynamic HF Hub discovery (see DATA STRATEGY). Auto-excludes \`gpqa\`.
 - \`python3 teacher_judge.py [...]\` — LLM-as-judge relevance/quality filter (see DATA STRATEGY).
 - \`python3 teacher_synth.py [...]\` — teacher reasoning distillation / synthesis (see DATA STRATEGY).
-- \`python dataset_audit.py --data-path <jsonl>\` — **mandatory** hard gate. Fails on test-set contamination or low diversity.
+- \`python dataset_audit.py --data-path <jsonl> [--parent-path <jsonl>] [--strict-behavior]\` — **mandatory** hard gate. Fails on test-set contamination or low diversity. It ALSO hard-fails (exit 1, independent of \`--strict-behavior\`) on any THINKING-ONLY violation: an \`ANSWER:\` marker inside a \`<think>\` block, or more than one \`ANSWER:\` marker in a row. With \`--parent-path\` it adds a behavioral guard (\`ANSWER:\` marker rate, answer-letter distribution, fraction of traces rewritten vs parent); \`--strict-behavior\` makes \`behavior.high_risk\` a hard gate (exit 1). See step 5.
 - \`python train_sft.py --data-path <jsonl> --output-dir experiments/exp_<N>/final_model\` — locked recipe. Whitelisted args only: \`--data-path\`, \`--output-dir\`, \`--max-steps\`, \`--seed\`. (\`$MODEL_TO_TRAIN\` is fixed; no \`--base-model\` flag.)
 - \`python publish_experiment.py --exp-dir experiments/exp_<N>/ [--data-sources "..."] [--promoted | --audit-failed] [--done]\` — appends one row to \`$SHARED_LOG_CSV\` and to \`experiments/index.csv\`. \`--done\` is an emergency backstop the publisher refuses 99% of the time — do NOT reach for it. The framework, not you, decides when the run ends (see "Operating discipline").
 - \`python evaluate.py --model-path <path> --limit -1 --json-output-file <path> --max-tokens 16000 --max-connections 8 --gpu-memory-utilization 0.8\` — full self-eval. You are EXPECTED to run this on every experiment (see step 7). NOTE: \`--max-tokens 16000\` is mandatory; see step 7.
@@ -127,7 +198,7 @@ client = openai.OpenAI(base_url=os.environ["TEACHER_VLLM_URL"],
 resp = client.chat.completions.create(
     model=os.environ["TEACHER_MODEL_NAME"],
     messages=[{"role": "user", "content": "..."}],
-    max_tokens=2048,  # give the teacher room to reason
+    max_tokens=6144,  # give the teacher room to reason (matches the helpers)
 )
 \`\`\`
 
@@ -190,24 +261,71 @@ cp experiments/<parent>/data.jsonl experiments/exp_<N>/data.jsonl
 cp experiments/<parent>/build_dataset.py experiments/exp_<N>/build_dataset.py
 \`\`\`
 Then apply your ONE hypothesis delta. Otherwise build fresh via DISCOVER -> JUDGE ->
-SYNTHESIZE (see DATA STRATEGY). Remember the row format: assistant turns must be
-step-by-step reasoning ending in \`ANSWER: <LETTER>\`, never answer-only.
+SYNTHESIZE (see DATA STRATEGY). Remember the row format is THINKING-ONLY: each
+assistant turn is a single \`<think>...</think>\` reasoning block then exactly one
+trailing \`ANSWER: <LETTER>\` line (after \`</think>\`, none inside \`<think>\`), never
+answer-only.
 (For cross-agent parents whose files you cannot see, build from scratch and cite
 the peer parent in \`## Parent\`.)
 
-**Step 5. AUDIT — mandatory.**
+**Step 5. AUDIT — mandatory. Pass the parent so the behavioral guard can fire.**
 \`\`\`bash
-python dataset_audit.py --data-path experiments/exp_<N>/data.jsonl
+python dataset_audit.py --data-path experiments/exp_<N>/data.jsonl \\
+    --parent-path experiments/<parent>/data.jsonl --strict-behavior
 \`\`\`
 If audit fails, either fix and re-audit, or \`publish_experiment.py --audit-failed\`
 to record the disproven hypothesis and move on. (The teacher_judge.py
 \`*.kept.jsonl\` output is already schema-clean and pipes straight in here.)
+
+**BEHAVIORAL GUARD — treat \`behavior.high_risk\` as a STOP.** When you pass
+\`--parent-path\`, the audit adds a top-level \`behavior\` object and (with
+\`--strict-behavior\`) makes \`behavior.high_risk\` a HARD gate (exit 1). It trips on:
+(a) the \`ANSWER: <LETTER>\` marker rate falling below 0.95 or dropping >0.05 vs
+parent, (b) the A-D answer-letter distribution drifting >0.15 per letter vs parent,
+or (c) MORE than 50% of traces rewritten vs parent (mass rewrite). If it flags
+high_risk, DO NOT "fix" it by sanitizing/renaming the \`ANSWER:\` marker or by
+mass-rewriting traces — STOP and rethink the delta. The literal \`ANSWER:\` marker is
+load-bearing learned answer-extraction behavior: exp_004 mass-stripped scaffolding
+(939/950 rows rewritten) and collapsed GPQA from ~0.29 to ~0.14; exp_016 renamed the
+internal \`ANSWER:\` marker to \`answer line:\` and produced 266/448 BLANK outputs,
+collapsing to ~0.13. Both PASSED the old contamination/diversity audit — that is
+exactly why this behavioral guard exists. Keep the marker exactly \`ANSWER: <LETTER>\`
+and keep trace edits surgical.
+
+**MIGRATING A BARE-CoT PARENT TO THINKING-ONLY.** Wrapping a parent's bare-CoT
+traces into \`<think>...</think>\` touches every row, so it WILL trip the
+>50%-traces-rewritten mass-rewrite guard. Do it as ONE clean hypothesis ("wrapping
+bare CoT into a \`<think>\` block improves scores"): wrap the reasoning ONLY — keep
+the \`ANSWER:\` marker and the answer LETTERS unchanged, no other content edits in the
+same experiment. That keeps the marker-rate / letter-distribution sub-checks green
+so the only expected trip is the rewrite-fraction one, isolating the format effect.
+Also: \`dataset_audit.py\` now HARD-FAILS (exit 1, independent of \`--strict-behavior\`)
+on any \`ANSWER:\` inside \`<think>\` or more than one \`ANSWER:\` per row — scrub any
+stray in-think \`ANSWER:\` from the wrapped traces before auditing.
 
 **Step 6. TRAIN — locked recipe.**
 \`\`\`bash
 python train_sft.py --data-path experiments/exp_<N>/data.jsonl \\
     --output-dir experiments/exp_<N>/final_model
 \`\`\`
+NOTE — \`MAX_SEQ_LEN\` is now 8192 (raised from 2048) so longer thinking-only CoT
+fits. But the trainer RIGHT-TRUNCATES the TAIL: any target that exceeds 8192 tokens
+loses its trailing \`ANSWER:\` line and the row is silently poisoned (the model learns
+to think forever and never answer). Keep each FULL target (user prompt + \`<think>\`
+block + \`ANSWER:\` line) comfortably within 8192 — teacher_synth's
+\`enforce_seq_budget\` tail-trims the \`<think>\` body to protect the ANSWER line, but
+don't rely on it; favour tighter CoT. \`MAX_SEQ_LEN\` is set INSIDE the locked
+\`train_sft.py\` — it is NOT a flag. You still pass only \`--data-path\` /
+\`--output-dir\` / \`--max-steps\` / \`--seed\`.
+If you intend to PROMOTE this as a NEW BEST (step 10), you must confirm it across
+TWO seeds — train a second model on the SAME data with a different \`--seed\`:
+\`\`\`bash
+python train_sft.py --data-path experiments/exp_<N>/data.jsonl \\
+    --output-dir experiments/exp_<N>/final_model_seed2 --seed 7
+\`\`\`
+A single-seed ~1pt delta is almost certainly seed noise (the V3 run built 11 of 18
+experiments on a 0.2879-vs-0.2812 single-seed gap that the margin test below would
+have rejected). Don't build a long subtree on an unconfirmed best.
 
 **Step 7. SELF-EVAL (mandatory, full sample, full reasoning room).** Run:
 \`\`\`bash
@@ -235,6 +353,25 @@ Parse the accuracy out of \`eval_result.json\` (e.g.,
 \`python3 -c "import json; d=json.load(open('experiments/exp_<N>/eval_result.json')); print(d.get('accuracy'))"\`
 — check the structure first). Compare to your parent's \`eval_result.json\`.
 
+If you trained a SECOND seed (step 6) to confirm a new best, eval IT too, to a
+distinct file so both can be averaged at publish:
+\`\`\`bash
+python3 evaluate.py \\
+    --model-path experiments/exp_<N>/final_model_seed2 \\
+    --limit -1 \\
+    --json-output-file experiments/exp_<N>/eval_result_seed2.json \\
+    --max-tokens 16000 --max-connections 8 --gpu-memory-utilization 0.8
+\`\`\`
+
+**Step 7b. THINK-TERMINATION DIAGNOSTIC.** From \`eval_result.json\` (and the inspect
+logs it points to), measure \`think_termination_rate\`: the fraction of completions
+that BOTH closed \`</think>\` AND emitted a parseable final \`ANSWER: <LETTER>\`. A LOW
+rate is the exp_016 failure class — the model over-thinks, blows the 16000-token
+budget, never closes \`</think>\`, returns a BLANK answer. That STOP signal points the
+OPPOSITE way from "reason more": SHORTEN the distilled CoT next experiment (tighter
+\`<think>\` bodies, lower teacher \`--max-tokens\`), do NOT lengthen it. Record the rate
+(and its move vs parent) in \`## Findings\`.
+
 **Step 8. WRITE FINDINGS + OUTCOME.**
 - \`## Findings\`: 2-4 sentences about what surprised you, NOT just "hypothesis
   held". The unplanned learning is what's valuable to peers.
@@ -246,7 +383,11 @@ Parse the accuracy out of \`eval_result.json\` (e.g.,
   confidence: high | med | low
   \`\`\`
   \`marginal\` means within ±0.005 of parent (i.e., noise). Anything strictly
-  outside that band is \`yes\` (improved) or \`no\` (regression).
+  outside that band is \`yes\` (improved) or \`no\` (regression). NOTE: this is your
+  STATED outcome; the publisher arbitrates. If you stated \`yes\` on a single-seed
+  delta, the publisher DOWNGRADES it to \`no\` unless your multi-seed eval mean clears
+  the promotion margin (step 10, rule 16). So if you want this row to count as
+  improved/promote, confirm it with a second seed (steps 6-7).
 
 **Step 9. APPEND TO KNOWLEDGE.md.** Add 1-3 lines. Strict format (publisher checks):
 \`\`\`
@@ -255,12 +396,13 @@ Parse the accuracy out of \`eval_result.json\` (e.g.,
 Tag whitelist: \`#data\`, \`#filter\`, \`#format\`, \`#training\`, \`#audit\`, \`#dead-end\`, \`#meta\`.
 Be specific. Examples:
 - Bad: \`[#filter] filtering helped\`
-- Good: \`[#format] distilling teacher CoT (reasoning then ANSWER: X) over mined sciq beat answer-only rows 0.31->0.36 — the eval rewards the reasoning, answer-only caps it\`
+- Good: \`[#format] thinking-only distill (<think>CoT</think> then ANSWER: X) over mined sciq beat answer-only rows 0.31->0.36 — the eval rewards the reasoning, answer-only caps it\`
 
 **Step 10. PUBLISH.**
 \`\`\`bash
 python publish_experiment.py --exp-dir experiments/exp_<N>/ \\
     [--data-sources "<hf_id1>,<hf_id2>,synthetic"] \\
+    [--eval-results "experiments/exp_<N>/eval_result.json,experiments/exp_<N>/eval_result_seed2.json"] \\
     [--promoted | --audit-failed]
 \`\`\`
 List EVERY source you used in \`--data-sources\` (HF ids + \`synthetic\` for
@@ -268,6 +410,18 @@ teacher_synth GENERATE output) — the source-novelty gate reads this. If
 \`outcome.improved == yes\` and you want this to be the new candidate parent for
 future experiments, also pass \`--promoted\`. \`--promoted\` is downgraded to False
 unless audit_pass AND decontam_pass AND outcome_improved == "yes".
+
+**PROMOTION NEEDS A MARGIN OVER A 2ND SEED.** To promote a new best, hand the
+publisher BOTH seeds' eval files via \`--eval-results\` (comma/space list of
+\`eval_result*.json\`) or pass each accuracy with a repeatable \`--eval-after ACC\`
+(one per seed); it also auto-globs \`eval_result*.json\` in \`--exp-dir\`. The
+publisher records \`eval_after_mean\`, \`eval_after_std\`, \`n_eval_seeds\` (schema v5)
+and applies the rule: \`outcome_improved=yes\` / promoted ONLY if
+\`eval_after_mean > eval_before + max(PROMOTION_MARGIN_FLOOR, PROMOTION_STD_K *
+eval_after_std)\` (defaults 0.015 and 1.0; both env-overridable). A stated
+\`improved: yes\` is DOWNGRADED to no when the mean fails to clear that margin — so a
+single-seed ~1pt delta will not promote, and you must NOT build a long subtree on
+one. Confirm with the second seed (steps 6-7) before treating anything as best.
 
 If promoted, also copy this exp's final_model as the run's final_model:
 \`rm -rf final_model && cp -r experiments/exp_<N>/final_model final_model\`.
@@ -301,6 +455,25 @@ HARD GATES (system-enforced — you will see SystemExit messages if you violate 
   (auto-excludes gpqa) to find a fresh source, or \`teacher_synth.py --mode
   generate\` for novel synthetic. Exempt: \`--audit-failed\` rows and exp_001.
 
+- QUERY-DIVERSITY GATE: \`discover_datasets.py\` refuses (exit code 6) a \`--keywords\`
+  query too similar (Jaccard > \`--max-query-similarity\`, default 0.6) to one it has
+  already accepted (logged in \`--query-log\`). Vary the search axis instead of
+  re-running the same query; \`--force\` overrides only for a deliberate re-run.
+
+- BEHAVIORAL GUARD: run \`dataset_audit.py\` with \`--parent-path\` so it checks the
+  candidate against the parent for mass trace rewrites and \`ANSWER:\`-marker / answer-
+  letter drift. With \`--strict-behavior\`, \`behavior.high_risk\` is a HARD gate (exit
+  1). Treat a high_risk flag as a STOP, NOT something to sanitize around: do NOT
+  rename/strip the \`ANSWER:\` marker or mass-rewrite traces (exp_004 -> ~0.14,
+  exp_016 -> ~0.13). See step 5.
+
+- THINK-HYGIENE GATE (ALWAYS on): \`dataset_audit.py\` hard-fails (exit 1) on any row
+  with an \`ANSWER:\` marker INSIDE a \`<think>\` block, or with more than one \`ANSWER:\`
+  marker. This fires regardless of \`--strict-behavior\` and regardless of whether
+  decontam/diversity pass. The eval scorer takes the FIRST \`^ANSWER:\` match, so an
+  in-think \`ANSWER:\` mis-scores the row even though the trailing one looks right —
+  scrub it upstream. See the THINKING-ONLY FORMAT note at the top and step 5.
+
 - The codex session may be respawned by solve.sh if you exit early. Treat each
   respawn as a CONTINUATION, not a fresh start. Read KNOWLEDGE.md, find your
   last in-progress experiment (highest exp_NNN dir), and resume from where you
@@ -327,7 +500,7 @@ and gives peers no readable signal.
 1. There will be no user interaction. Operate autonomously.
 2. You have a maximum of {num_hours} hours. Query remaining time with \`bash timer.sh\`. Use ALL of it. The SLURM timer is what ends the run; don't end it yourself.
 3. **No test data in training.** \`dataset_audit.py\` enforces this; do not try to bypass it. discover_datasets.py also hard-excludes any source mentioning \`gpqa\`.
-4. **Reasoning, not answers.** Training rows must teach step-by-step reasoning ending in \`ANSWER: <LETTER>\`. Answer-only data caps a reasoning benchmark — don't ship it.
+4. **Thinking-only reasoning.** Each training row's assistant turn is a single \`<think>...</think>\` reasoning block then exactly one trailing \`ANSWER: <LETTER>\` line — the \`ANSWER:\` line AFTER \`</think>\`, and NO \`ANSWER:\` inside \`<think>\`. Answer-only data caps a reasoning benchmark — don't ship it; the audit hard-fails on an in-think or duplicate \`ANSWER:\` marker.
 5. **Every 5th experiment needs a new data source.** exp_005, exp_010, ... MUST introduce at least one data source not used in any prior shared_log row. publish_experiment.py enforces this. Use \`discover_datasets.py\` to find new sources and go WIDE.
 6. **Do not modify** \`evaluate.py\`, \`templates/\`, \`train_sft.py\`, \`dataset_audit.py\`, or \`publish_experiment.py\`. They are read-only by policy.
 7. **Do not read peers' \`experiments/\` directories.** Your only window into peer work is \`$SHARED_LOG_CSV\`. (Filesystem isolation enforces this anyway; don't waste time trying.)
@@ -339,7 +512,7 @@ and gives peers no readable signal.
 13. **You MUST run \`evaluate.py --limit -1 --max-tokens 16000 --json-output-file experiments/exp_<N>/eval_result.json\` after training and BEFORE writing \`## Outcome\`.** The improved/no/marginal judgment must be grounded in the actual score delta vs parent. The publisher cross-checks your stated \`eval_after\` against the file (tolerance 0.01); fudging is detected.
 14. **Do NOT reach for \`--done\`.** It is an emergency backstop, not a goal. The publisher refuses it before exp_010, and after exp_010 only honors it if the last 10 experiments ALL have \`outcome_improved != "yes"\` (plateau). The SLURM timer ends the run, not you. See "Operating discipline".
 15. **Parent must follow the backtrack rule.** The expected parent is the most-recent local row with \`outcome_improved == "yes"\` (or \`none\` if none exists yet). If you want to fork from a non-most-recent-improved parent (e.g., to escape a local optimum after multiple failures off the same parent), you MUST include the marker \`[override:<short_reason>]\` in your \`## Method\` section. The publisher refuses an off-parent fork without that marker.
-16. **Promoted means VERIFIED improvement.** \`--promoted\` is downgraded to False unless audit_pass AND decontam_pass AND \`outcome_improved == "yes"\`. Use it to mark a row as the new candidate parent.
+16. **Promoted means VERIFIED improvement — confirmed across a 2nd seed by a margin.** \`--promoted\` is downgraded to False unless audit_pass AND decontam_pass AND \`outcome_improved == "yes"\`. And \`outcome_improved == "yes"\` itself now requires \`eval_after_mean > eval_before + max(PROMOTION_MARGIN_FLOOR=0.015, PROMOTION_STD_K=1.0 * eval_after_std)\`: train a SECOND seed (\`train_sft.py --seed <different>\`), eval both, and pass both eval files via \`--eval-results\` / \`--eval-after\` (see steps 6, 7, 10). A single-seed ~1pt delta will NOT clear the margin — do not build a long subtree on one. Use \`--promoted\` to mark the new candidate parent.
 17. **Inspect teacher-synthetic content before training on it.** If your dataset uses the teacher vLLM endpoint to generate novel questions OR distill rationales, sample 5-10 rows BEFORE running \`dataset_audit.py\` and read them: are the answers actually correct? Does each rationale actually reach the claimed \`ANSWER:\` letter? If a non-trivial fraction (>20%) are wrong or incoherent, the synthetic content is poisoning your training data and your hypothesis chain will compound the noise. Either fix the teacher prompt or fall back to mined-rationale sources.
 18. You may not invent additional flags for \`train_sft.py\`. Only \`--data-path\`, \`--output-dir\`, \`--max-steps\`, \`--seed\` are accepted.
 

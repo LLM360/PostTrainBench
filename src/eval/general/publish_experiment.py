@@ -42,6 +42,14 @@ Schema history:
        checks. Backtrack-rule parent validation. --done flag with
        >=10-experiment floor and 10-experiment plateau. effective_promoted
        additionally requires outcome_improved == "yes".
+- v5 (V4 multi-seed promotion margin): multiple eval seeds are accepted
+       (repeatable --eval-after, --eval-results list, or auto-glob of
+       eval_result*.json in the exp dir). New columns: eval_after_mean,
+       eval_after_std, n_eval_seeds. A candidate is outcome_improved=yes /
+       effective_promoted ONLY when eval_after_mean beats the incumbent
+       (eval_before) by more than max(PROMOTION_MARGIN_FLOOR,
+       PROMOTION_STD_K * eval_after_std) — both env-overridable. Single
+       eval_after still works (mean=value, std=0.0, n=1).
 """
 from __future__ import annotations
 
@@ -57,7 +65,7 @@ import shutil
 import sys
 from pathlib import Path
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 SCHEMA_HEADER_LINE = f"# schema_version={SCHEMA_VERSION}\n"
 
 # V3 full-eval sample-count gate. Maps benchmark task name to the
@@ -81,6 +89,42 @@ SOURCE_NOVELTY_EVERY = 5
 # smaller than this, the eval forbade reasoning and is invalid — refuse.
 # Closes the V3 bug where the agent self-eval'd with --max-tokens 128.
 MIN_EVAL_MAX_TOKENS = 4096
+
+# V4 (multi-seed promotion margin). Single-seed scores were promotion noise
+# in the V4 pilot: exp_007 (0.2879) beat exp_002 (0.2812) by ~1pt — within
+# seed noise — yet 11 of 18 experiments forked from exp_007. A candidate now
+# may only be marked outcome_improved=yes / effective_promoted if its
+# multi-seed mean beats the incumbent by MORE than the noise band:
+#
+#   eval_after_mean > incumbent + max(PROMOTION_MARGIN_FLOOR,
+#                                     PROMOTION_STD_K * eval_after_std)
+#
+# PROMOTION_MARGIN_FLOOR is the minimum absolute margin (guards against a
+# zero-std single seed sneaking through on a 0.001 lead). PROMOTION_STD_K
+# scales the across-seed std into the required margin. Both are overridable
+# via the like-named environment variables.
+def _env_float(name: str, default: float) -> float:
+    """Read a float from os.environ[name], falling back to `default`.
+
+    Non-parseable / empty values fall back to the default with a stderr
+    warning so a typo'd override never silently disables the margin.
+    """
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw.strip())
+    except (TypeError, ValueError):
+        print(
+            f"[publish V4] WARNING: env {name}={raw!r} is not a float; "
+            f"using default {default}.",
+            file=sys.stderr,
+        )
+        return default
+
+
+PROMOTION_MARGIN_FLOOR = _env_float("PROMOTION_MARGIN_FLOOR", 0.015)
+PROMOTION_STD_K = _env_float("PROMOTION_STD_K", 1.0)
 
 SHARED_FIELDS = [
     "agent_id",
@@ -106,6 +150,15 @@ SHARED_FIELDS = [
     # schema bump.
     "eval_before",
     "eval_after",
+    # V4 multi-seed promotion (schema v5). eval_after_mean/std summarize the
+    # candidate's eval_result*.json across seeds; n_eval_seeds is how many
+    # were averaged. Backward compat: a single eval_after still works ->
+    # mean=value, std=0.0, n=1. Adding columns bumps SCHEMA_VERSION to 5 so
+    # the existing schema guard rotates an older (v4) file aside on first
+    # write rather than appending mis-aligned rows.
+    "eval_after_mean",
+    "eval_after_std",
+    "n_eval_seeds",
     "outcome_improved",
     "findings_short",
     "notes_excerpt",
@@ -136,6 +189,9 @@ FORBIDDEN_PREFIXES = ("eval_", "score_")
 FORBIDDEN_EXEMPT = frozenset({
     "eval_before",
     "eval_after",
+    # V4 multi-seed summary columns (n_eval_seeds has no forbidden prefix).
+    "eval_after_mean",
+    "eval_after_std",
 })
 
 REQUIRED_SECTIONS = ("Parent", "Hypothesis", "Method", "Findings", "Outcome")
@@ -232,6 +288,34 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Declare this run finished. Requires >=10 published experiments "
             "AND the last 10 outcomes all != 'yes' (plateau). Refused otherwise."
+        ),
+    )
+    # V4 multi-seed promotion. Any combination of the two flags below is
+    # merged with an auto-glob of eval_result*.json in --exp-dir. The union of
+    # all discovered accuracies forms the seed set used for eval_after_mean /
+    # eval_after_std / n_eval_seeds and the promotion-margin check. With none
+    # of them supplied (and a single eval_result.json present, the legacy
+    # path), n=1 / std=0.0 / mean=the single score — fully backward compatible.
+    p.add_argument(
+        "--eval-after",
+        action="append",
+        type=float,
+        default=None,
+        metavar="ACC",
+        help=(
+            "A per-seed eval accuracy (float). Repeat for multiple seeds, "
+            "e.g. --eval-after 0.31 --eval-after 0.29. Merged with "
+            "--eval-results and any auto-globbed eval_result*.json."
+        ),
+    )
+    p.add_argument(
+        "--eval-results",
+        default=None,
+        metavar="PATHS",
+        help=(
+            "Comma- or whitespace-separated list of eval_result*.json files "
+            "(one per seed). Each is parsed for its accuracy. Merged with "
+            "--eval-after and any auto-globbed eval_result*.json in --exp-dir."
         ),
     )
     return p.parse_args()
@@ -1103,6 +1187,162 @@ def _extract_accuracy(data: dict) -> float | None:
     return None
 
 
+# V4: MULTI-SEED PROMOTION ------------------------------------------------
+def _split_path_list(raw: str | None) -> list[str]:
+    """Split a --eval-results value on commas and/or whitespace.
+
+    Returns the list of non-empty trimmed tokens. Empty/None -> [].
+    """
+    if not raw:
+        return []
+    return [tok for tok in re.split(r"[,\s]+", raw.strip()) if tok]
+
+
+def _accuracy_from_eval_file(path: Path) -> float | None:
+    """Read an eval_result*.json and return its accuracy, or None.
+
+    Missing/unreadable/unparseable files and files without a recognizable
+    accuracy field return None (caller decides whether that's fatal).
+    """
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        print(
+            f"[publish V4] WARNING: could not read eval result {path}: {exc}; "
+            "skipping this seed.",
+            file=sys.stderr,
+        )
+        return None
+    if not isinstance(data, dict):
+        return None
+    return _extract_accuracy(data)
+
+
+def collect_eval_seed_scores(
+    exp_dir: Path,
+    cli_eval_after: list[float] | None,
+    cli_eval_results: str | None,
+) -> list[float]:
+    """Collect per-seed eval accuracies from CLI flags + auto-globbed files.
+
+    Sources, unioned (de-dup is intentionally NOT applied — two seeds can
+    legitimately produce the same accuracy and both should count toward n):
+    1. --eval-after floats (repeatable).
+    2. --eval-results paths (comma/space list of eval_result*.json), parsed
+       for their accuracy via _extract_accuracy.
+    3. Auto-glob of <exp_dir>/eval_result*.json (the canonical single-file
+       eval_result.json plus any eval_result_seedK.json siblings), parsed
+       the same way.
+
+    Glob files explicitly named on --eval-results are not double-counted.
+    Returns the list of floats (possibly empty). The caller is responsible
+    for the legacy single-score fallback (## Outcome eval_after) when this
+    list is empty.
+    """
+    scores: list[float] = []
+
+    # 1. Explicit per-seed floats.
+    for v in (cli_eval_after or []):
+        scores.append(float(v))
+
+    # 2. Explicit per-seed files. Track resolved paths so the auto-glob below
+    #    doesn't count the same file twice.
+    explicit: set[Path] = set()
+    for tok in _split_path_list(cli_eval_results):
+        p = Path(tok)
+        if not p.is_absolute():
+            # Resolve relative to CWD first, then to the exp dir as a
+            # convenience (agents often pass bare 'eval_result_seed1.json').
+            cand = p if p.is_file() else (exp_dir / tok)
+        else:
+            cand = p
+        cand = cand.resolve()
+        explicit.add(cand)
+        acc = _accuracy_from_eval_file(cand)
+        if acc is not None:
+            scores.append(acc)
+        else:
+            print(
+                f"[publish V4] WARNING: --eval-results entry {tok!r} "
+                f"({cand}) had no readable accuracy; skipping.",
+                file=sys.stderr,
+            )
+
+    # 3. Auto-glob eval_result*.json in the exp dir.
+    for p in sorted(exp_dir.glob("eval_result*.json")):
+        if p.resolve() in explicit:
+            continue
+        acc = _accuracy_from_eval_file(p)
+        if acc is not None:
+            scores.append(acc)
+
+    return scores
+
+
+def compute_seed_stats(scores: list[float]) -> tuple[float | None, float, int]:
+    """Return (mean, population_std, n) for a list of per-seed accuracies.
+
+    - n == 0  -> (None, 0.0, 0): no seed signal at all.
+    - n == 1  -> (score, 0.0, 1): single seed, zero spread (legacy behavior).
+    - n >= 2  -> population std (ddof=0) so a 2-seed sample still yields a
+      finite spread the margin can consume.
+    """
+    n = len(scores)
+    if n == 0:
+        return None, 0.0, 0
+    mean = sum(scores) / n
+    if n == 1:
+        return mean, 0.0, 1
+    var = sum((s - mean) ** 2 for s in scores) / n
+    return mean, var ** 0.5, n
+
+
+def promotion_margin(std: float) -> float:
+    """The accuracy margin a candidate must clear to count as improved.
+
+    margin = max(PROMOTION_MARGIN_FLOOR, PROMOTION_STD_K * std)
+
+    The floor guards against a zero-std single seed promoting on a 0.001
+    lead; the std term widens the bar when the across-seed spread is large.
+    """
+    return max(PROMOTION_MARGIN_FLOOR, PROMOTION_STD_K * float(std))
+
+
+def passes_promotion_margin(
+    eval_after_mean: float | None,
+    incumbent_eval: float | None,
+    eval_after_std: float,
+) -> bool:
+    """True iff the candidate beats the incumbent by more than the noise band.
+
+    Returns False (refuse to call it an improvement) whenever we lack the
+    numbers to make the call — a missing mean or a missing/non-float
+    incumbent (eval_before='none', i.e. exp_001 with no parent) cannot
+    establish a real improvement over an incumbent, so the margin is not met.
+
+    The comparison is strict (>) so a candidate landing exactly on the bar
+    does not promote.
+    """
+    if eval_after_mean is None or incumbent_eval is None:
+        return False
+    return eval_after_mean > incumbent_eval + promotion_margin(eval_after_std)
+
+
+def _to_float_or_none(value: str | None) -> float | None:
+    """Parse a float, returning None for None/empty/'none'/unparseable."""
+    if value is None:
+        return None
+    s = value.strip()
+    if not s or s.lower() == "none":
+        return None
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return None
+
+
 def _validate_knowledge_md(
     knowledge_path: Path,
     exp_dir_name: str,
@@ -1304,6 +1544,65 @@ def main() -> int:
     outcome_eval_before = outcome.get("eval_before", "") if outcome else ""
     outcome_eval_after = outcome.get("eval_after", "") if outcome else ""
 
+    # V4: MULTI-SEED. Gather every per-seed accuracy we can see (repeatable
+    # --eval-after, --eval-results list, and auto-globbed eval_result*.json),
+    # then summarize into mean/std/n. Backward compat: when no seed signal is
+    # found via the new sources, fall back to the single ## Outcome eval_after
+    # the agent stated (n=1, std=0.0). This keeps every existing single-seed
+    # publish flow working unchanged while letting newer flows supply seeds.
+    seed_scores = collect_eval_seed_scores(
+        exp_dir, args.eval_after, args.eval_results
+    )
+    if not seed_scores:
+        legacy = _to_float_or_none(outcome_eval_after)
+        if legacy is not None:
+            seed_scores = [legacy]
+    eval_after_mean, eval_after_std, n_eval_seeds = compute_seed_stats(seed_scores)
+    if n_eval_seeds > 1:
+        print(
+            f"[publish V4] multi-seed: n={n_eval_seeds} "
+            f"mean={eval_after_mean:.4f} std={eval_after_std:.4f} "
+            f"scores={[round(s, 4) for s in seed_scores]}.",
+            file=sys.stderr,
+        )
+
+    # V4 PROMOTION MARGIN: a candidate may only claim improvement
+    # (outcome_improved=yes / and later effective_promoted) when its
+    # across-seed mean beats the incumbent (eval_before, the parent's score)
+    # by MORE than the noise band max(PROMOTION_MARGIN_FLOOR,
+    # PROMOTION_STD_K * eval_after_std). This closes the V4 pilot failure
+    # where exp_007 beat exp_002 by ~1pt on a single seed and the whole run
+    # forked from it. The agent's stated ## Outcome improved:yes is now
+    # necessary but not sufficient — it is downgraded to 'no' whenever the
+    # margin is not cleared. This downgrade happens BEFORE the --done plateau
+    # check and the backtrack-parent index write so both consume the
+    # margin-gated verdict (a within-noise gain is NOT a real improvement).
+    # All other gates (audit_pass/decontam_pass, source-novelty, eval-token,
+    # full-dataset, KNOWLEDGE.md, backtrack parent) remain unchanged.
+    incumbent_eval = _to_float_or_none(outcome_eval_before)
+    margin_ok = passes_promotion_margin(
+        eval_after_mean, incumbent_eval, eval_after_std
+    )
+    if outcome_improved == "yes" and not margin_ok:
+        required = (
+            (incumbent_eval + promotion_margin(eval_after_std))
+            if incumbent_eval is not None and eval_after_mean is not None
+            else None
+        )
+        print(
+            "[publish V4 PROMOTION MARGIN] downgrading outcome_improved "
+            f"'yes' -> 'no': eval_after_mean="
+            f"{eval_after_mean if eval_after_mean is not None else 'n/a'} "
+            f"incumbent(eval_before)="
+            f"{incumbent_eval if incumbent_eval is not None else 'n/a'} "
+            f"std={eval_after_std:.4f} n={n_eval_seeds} "
+            f"margin={promotion_margin(eval_after_std):.4f} "
+            f"(needed mean > {required if required is not None else 'incumbent+margin'}). "
+            "Within-noise gains do not count as improvement.",
+            file=sys.stderr,
+        )
+        outcome_improved = "no"
+
     # V4: EVAL-TOKEN GUARD. Closes the V3 bug at the publisher level: if
     # eval_result.json proves the self-eval ran with a generation budget
     # smaller than MIN_EVAL_MAX_TOKENS, reasoning was forbidden and the
@@ -1390,7 +1689,10 @@ def main() -> int:
     # never actually got persisted to /shared_log/promoted/.
     #
     # V2 additionally requires outcome_improved == 'yes': "promoted" means
-    # VERIFIED improvement, not just "passed gates".
+    # VERIFIED improvement, not just "passed gates". outcome_improved has
+    # already been margin-gated above (V4), so outcome_yes here reflects the
+    # noise-band-aware verdict; effective_promoted then ANDs in the unchanged
+    # audit_pass / decontam_pass gates.
     outcome_yes = (outcome_improved == "yes")
     effective_promoted = bool(
         args.promoted and audit_pass and decontam_pass and outcome_yes
@@ -1454,6 +1756,12 @@ def main() -> int:
         # are the canonical place to look for "did it improve" signal.
         "eval_before": outcome_eval_before,
         "eval_after": outcome_eval_after,
+        # V4 multi-seed summary. _fmt renders None -> "" and floats to 4dp,
+        # matching the diversity columns; n_eval_seeds is a plain int. A
+        # single-seed publish records mean=eval_after, std=0.0000, n=1.
+        "eval_after_mean": _fmt(eval_after_mean),
+        "eval_after_std": _fmt(eval_after_std),
+        "n_eval_seeds": n_eval_seeds,
         "outcome_improved": outcome_improved,
         "findings_short": findings_short,
         "notes_excerpt": notes_excerpt,

@@ -45,9 +45,145 @@ SORT_MAP = {
 SAMPLE_CHARS = 400          # truncate the 1-row sample to ~this many chars
 PROBE_TIMEOUT_S = 20.0      # soft per-dataset budget for sample loading
 
+# --- query-diversity gate ----------------------------------------------------
+# V4 24h pilot post-mortem: discovery was NARROW. ~8 near-duplicate queries
+# (all "graduate/college physics chemistry biology medical multiple choice
+# exam") were re-run, only ~3.3% of surfaced candidates were adopted, and the
+# top-ranked ceval/ceval-exam source was never explored. This gate forces the
+# agent to search WIDE by refusing a new --keywords set whose token-set Jaccard
+# vs any prior accepted query exceeds --max-query-similarity (unless --force).
+DEFAULT_QUERY_LOG = "experiments/discovery_query_log.json"
+DEFAULT_MAX_QUERY_SIMILARITY = 0.6
+
+# Stopwords stripped during normalization so that the *content* axes dominate
+# the similarity comparison (otherwise every MCQ query collides on filler).
+_QUERY_STOPWORDS = frozenset({
+    "a", "an", "the", "of", "for", "and", "or", "to", "in", "on", "with",
+    "level", "style", "type", "kind", "dataset", "datasets", "data",
+    "question", "questions", "answer", "answers",
+})
+
+# Orthogonal axes the agent should try INSTEAD of re-running near-duplicates.
+_ORTHOGONAL_AXES = [
+    "astronomy/astrophysics",
+    "materials science",
+    "electrical/computer engineering",
+    "organic chemistry",
+    "genetics/molecular biology",
+    "'graduate expert exam'",
+    "non-MCQ framings (free-response, derivation, proof)",
+]
+_ALTERNATE_SORTS = ["trending", "likes"]
+
 
 def log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
+
+
+# --- PURE (network-free, unit-testable) similarity helpers -------------------
+def normalize_keywords(keywords: Any) -> frozenset[str]:
+    """Normalize a keyword query into a comparable token SET (pure function).
+
+    Accepts either a raw string ("graduate physics MCQ") or an already-split
+    list of tokens. Lowercases, splits on non-alphanumeric boundaries, drops
+    stopwords and 1-char tokens, and returns a frozenset suitable for Jaccard.
+    No network, no I/O — safe to unit-test in isolation.
+    """
+    if isinstance(keywords, str):
+        raw = keywords.split()
+    else:
+        raw = list(keywords or [])
+    tokens: set[str] = set()
+    for chunk in raw:
+        # split each chunk on anything that is not alphanumeric (handles
+        # "electrical/computer", "non-mcq", "physics,chemistry", etc.)
+        piece = ""
+        for ch in str(chunk).lower():
+            if ch.isalnum():
+                piece += ch
+            else:
+                if piece:
+                    tokens.add(piece)
+                    piece = ""
+        if piece:
+            tokens.add(piece)
+    return frozenset(t for t in tokens if len(t) > 1 and t not in _QUERY_STOPWORDS)
+
+
+def jaccard(a: frozenset[str], b: frozenset[str]) -> float:
+    """Jaccard similarity of two token sets (pure). Empty-vs-empty == 0.0."""
+    if not a and not b:
+        return 0.0
+    inter = len(a & b)
+    union = len(a | b)
+    return inter / union if union else 0.0
+
+
+def max_query_similarity(new_tokens: frozenset[str],
+                         prior_entries: list[dict[str, Any]]) -> tuple[float, dict[str, Any] | None]:
+    """Return (max Jaccard, colliding prior entry) vs the logged queries (pure).
+
+    Each prior entry is expected to carry a "normalized_token_set" list (as
+    written by the query log). Entries without one are skipped. Returns
+    (0.0, None) when there is nothing to compare against. No network, no I/O.
+    """
+    best_sim = 0.0
+    best_entry: dict[str, Any] | None = None
+    for entry in prior_entries or []:
+        toks = entry.get("normalized_token_set") if isinstance(entry, dict) else None
+        if not isinstance(toks, (list, tuple, set, frozenset)):
+            continue
+        sim = jaccard(new_tokens, frozenset(str(t) for t in toks))
+        if sim > best_sim:
+            best_sim = sim
+            best_entry = entry if isinstance(entry, dict) else None
+    return best_sim, best_entry
+
+
+def diversity_suggestion() -> str:
+    """Human-readable SUGGESTION block listing orthogonal axes + sorts (pure)."""
+    axes = "\n".join(f"      - {a}" for a in _ORTHOGONAL_AXES)
+    sorts = ", ".join(_ALTERNATE_SORTS)
+    return (
+        "  SUGGESTION: search WIDE instead. Try an orthogonal axis:\n"
+        f"{axes}\n"
+        f"    ...and/or a different --sort signal: {sorts}.\n"
+        "    (Pass --force to override this gate if you truly intend a re-run.)"
+    )
+
+
+# --- query-log I/O (best-effort, never fatal except on the gate itself) ------
+def load_query_log(path: str) -> list[dict[str, Any]]:
+    """Read the query log; return [] if absent or unparseable (best-effort)."""
+    import os
+
+    if not path or not os.path.exists(path):
+        return []
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:  # noqa: BLE001 - a corrupt log must not block discovery
+        log(f"[discover] WARNING: could not read --query-log {path}: {e}; treating as empty")
+        return []
+    if isinstance(data, dict) and isinstance(data.get("queries"), list):
+        data = data["queries"]
+    return data if isinstance(data, list) else []
+
+
+def append_query_log(path: str, entry: dict[str, Any]) -> None:
+    """Append one accepted run's entry to the query log (best-effort)."""
+    import os
+
+    log_entries = load_query_log(path)
+    log_entries.append(entry)
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(log_entries, f, indent=2, ensure_ascii=False, default=str)
+    except Exception as e:  # noqa: BLE001 - logging failure must not fail the run
+        log(f"[discover] WARNING: could not append to --query-log {path}: {e}")
 
 
 def _truncate(value: Any, limit: int = SAMPLE_CHARS) -> Any:
@@ -265,6 +401,13 @@ def main() -> int:
                    help="write digest JSON here (default: print to stdout)")
     p.add_argument("--no-sample", action="store_true",
                    help="skip the per-dataset 1-row sample probe (faster, less info)")
+    p.add_argument("--query-log", default=DEFAULT_QUERY_LOG,
+                   help="JSON log of prior accepted queries (diversity gate state)")
+    p.add_argument("--max-query-similarity", type=float,
+                   default=DEFAULT_MAX_QUERY_SIMILARITY,
+                   help="REFUSE if token-set Jaccard vs any prior query exceeds this")
+    p.add_argument("--force", action="store_true",
+                   help="override the query-diversity gate (records a forced re-run)")
     args = p.parse_args()
 
     if args.limit <= 0:
@@ -273,6 +416,24 @@ def main() -> int:
 
     keywords = [k for k in args.keywords.split() if k.strip()]
     sort_key = SORT_MAP[args.sort]
+
+    # --- query-diversity gate (BEFORE any network work) ----------------------
+    # Refuse near-duplicate searches so the agent is forced to explore WIDE.
+    new_tokens = normalize_keywords(keywords)
+    prior_entries = load_query_log(args.query_log)
+    sim, collide = max_query_similarity(new_tokens, prior_entries)
+    if sim > args.max_query_similarity and not args.force:
+        log(f"[fatal] query-diversity gate: --keywords too similar to a prior "
+            f"accepted query (Jaccard {sim:.2f} > {args.max_query_similarity:.2f}).")
+        if collide is not None:
+            log(f"  COLLIDING PRIOR QUERY: keywords={collide.get('keywords')!r} "
+                f"sort={collide.get('sort')!r} limit={collide.get('limit')!r} "
+                f"out={collide.get('out')!r}")
+        log(diversity_suggestion())
+        return 6
+    if sim > args.max_query_similarity and args.force:
+        log(f"[discover] WARNING: --force overriding diversity gate "
+            f"(Jaccard {sim:.2f} > {args.max_query_similarity:.2f}).")
 
     try:
         from huggingface_hub import HfApi
@@ -313,6 +474,18 @@ def main() -> int:
             return 5
     else:
         print(digest)
+
+    # Record this accepted run so future near-duplicates are refused.
+    append_query_log(args.query_log, {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "normalized_token_set": sorted(new_tokens),
+        "keywords": args.keywords,
+        "sort": args.sort,
+        "limit": args.limit,
+        "out": args.out,
+        "n_candidates": len(candidates),
+        "forced": bool(args.force and sim > args.max_query_similarity),
+    })
 
     return 0
 

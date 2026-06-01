@@ -178,7 +178,7 @@ then a single \`ANSWER: X\` line.
 - \`python3 discover_datasets.py [...]\` — dynamic HF Hub discovery (see DATA STRATEGY). Auto-excludes \`gpqa\`.
 - \`python3 teacher_judge.py [...]\` — LLM-as-judge relevance/quality filter (see DATA STRATEGY).
 - \`python3 teacher_synth.py [...]\` — teacher reasoning distillation / synthesis (see DATA STRATEGY).
-- \`python dataset_audit.py --data-path <jsonl> [--parent-path <jsonl>] [--strict-behavior]\` — **mandatory** hard gate. Fails on test-set contamination or low diversity. It ALSO hard-fails (exit 1, independent of \`--strict-behavior\`) on any THINKING-ONLY violation: an \`ANSWER:\` marker inside a \`<think>\` block, or more than one \`ANSWER:\` marker in a row. With \`--parent-path\` it adds a behavioral guard (\`ANSWER:\` marker rate, answer-letter distribution, fraction of traces rewritten vs parent); \`--strict-behavior\` makes \`behavior.high_risk\` a hard gate (exit 1). See step 5.
+- \`python dataset_audit.py --data-path <jsonl> [--parent-path <jsonl>] [--strict-behavior] [--allow-think-migration]\` — **mandatory** hard gate. Fails on test-set contamination or low diversity. It ALSO hard-fails (exit 1, independent of \`--strict-behavior\`) on any THINKING-ONLY shape violation: a row with NO \`<think>\` block, an unclosed/missing \`</think>\`, MULTIPLE \`<think>\` blocks, an \`ANSWER:\` marker before/inside \`<think>\`, more than one \`ANSWER:\` marker, or no \`ANSWER:\` line after \`</think>\`. With \`--parent-path\` it adds a behavioral guard (\`ANSWER:\` marker rate, answer-letter distribution, fraction of traces rewritten vs parent); \`--strict-behavior\` makes \`behavior.high_risk\` a hard gate (exit 1). \`--allow-think-migration\` waives ONLY the mass-rewrite hard-fail when every changed row is a pure \`<think>\` wrapper of the parent (one-time bare-CoT migration). OMIT \`--parent-path\` for \`Parent=none\` (exp_001) or cross-agent parents whose files you cannot read. See step 5.
 - \`python train_sft.py --data-path <jsonl> --output-dir experiments/exp_<N>/final_model\` — locked recipe. Whitelisted args only: \`--data-path\`, \`--output-dir\`, \`--max-steps\`, \`--seed\`. (\`$MODEL_TO_TRAIN\` is fixed; no \`--base-model\` flag.)
 - \`python publish_experiment.py --exp-dir experiments/exp_<N>/ [--data-sources "..."] [--promoted | --audit-failed] [--done]\` — appends one row to \`$SHARED_LOG_CSV\` and to \`experiments/index.csv\`. \`--done\` is an emergency backstop the publisher refuses 99% of the time — do NOT reach for it. The framework, not you, decides when the run ends (see "Operating discipline").
 - \`python evaluate.py --model-path <path> --limit -1 --json-output-file <path> --max-tokens 16000 --max-connections 8 --gpu-memory-utilization 0.8\` — full self-eval. You are EXPECTED to run this on every experiment (see step 7). NOTE: \`--max-tokens 16000\` is mandatory; see step 7.
@@ -268,11 +268,30 @@ answer-only.
 (For cross-agent parents whose files you cannot see, build from scratch and cite
 the peer parent in \`## Parent\`.)
 
-**Step 5. AUDIT — mandatory. Pass the parent so the behavioral guard can fire.**
-\`\`\`bash
-python dataset_audit.py --data-path experiments/exp_<N>/data.jsonl \\
-    --parent-path experiments/<parent>/data.jsonl --strict-behavior
-\`\`\`
+**Step 5. AUDIT — mandatory. Tailor the command to your parent situation.**
+
+- Parent is a LOCAL exp whose \`data.jsonl\` you can read — pass it so the
+  behavioral guard can fire:
+  \`\`\`bash
+  python dataset_audit.py --data-path experiments/exp_<N>/data.jsonl \\
+      --parent-path experiments/<parent>/data.jsonl --strict-behavior
+  \`\`\`
+- Parent is \`none\` (exp_001) OR a CROSS-AGENT parent whose file you cannot see —
+  OMIT \`--parent-path\` entirely (there is no readable parent to diff against; the
+  behavioral guard's drift checks simply don't run):
+  \`\`\`bash
+  python dataset_audit.py --data-path experiments/exp_<N>/data.jsonl --strict-behavior
+  \`\`\`
+- ONE-TIME bare-CoT -> thinking-only WRAPPER migration (see the migration note
+  below) — add \`--allow-think-migration\` so wrapping every parent trace in
+  \`<think>\` does not hard-fail on the mass-rewrite guard, while genuine
+  marker-rate / answer-letter damage still fails:
+  \`\`\`bash
+  python dataset_audit.py --data-path experiments/exp_<N>/data.jsonl \\
+      --parent-path experiments/<parent>/data.jsonl --strict-behavior \\
+      --allow-think-migration
+  \`\`\`
+
 If audit fails, either fix and re-audit, or \`publish_experiment.py --audit-failed\`
 to record the disproven hypothesis and move on. (The teacher_judge.py
 \`*.kept.jsonl\` output is already schema-clean and pipes straight in here.)
@@ -293,15 +312,25 @@ exactly why this behavioral guard exists. Keep the marker exactly \`ANSWER: <LET
 and keep trace edits surgical.
 
 **MIGRATING A BARE-CoT PARENT TO THINKING-ONLY.** Wrapping a parent's bare-CoT
-traces into \`<think>...</think>\` touches every row, so it WILL trip the
+traces into \`<think>...</think>\` touches every row, so it would trip the
 >50%-traces-rewritten mass-rewrite guard. Do it as ONE clean hypothesis ("wrapping
-bare CoT into a \`<think>\` block improves scores"): wrap the reasoning ONLY — keep
-the \`ANSWER:\` marker and the answer LETTERS unchanged, no other content edits in the
-same experiment. That keeps the marker-rate / letter-distribution sub-checks green
-so the only expected trip is the rewrite-fraction one, isolating the format effect.
-Also: \`dataset_audit.py\` now HARD-FAILS (exit 1, independent of \`--strict-behavior\`)
-on any \`ANSWER:\` inside \`<think>\` or more than one \`ANSWER:\` per row — scrub any
-stray in-think \`ANSWER:\` from the wrapped traces before auditing.
+bare CoT into a \`<think>\` block improves scores") and run the audit with
+\`--allow-think-migration\` (the migration variant of the step-5 command above):
+wrap the reasoning ONLY — keep the \`ANSWER:\` marker and the answer LETTERS
+unchanged, no other content edits in the same experiment. Under
+\`--allow-think-migration\` the audit verifies the change is a PURE \`<think>\` wrapper
+(stripping \`<think>...</think>\` recovers the parent's reasoning text AND the same
+final \`ANSWER:\` letter) and only then waives the rewrite-fraction hard-fail — so
+the marker-rate / letter-distribution sub-checks stay green and isolate the format
+effect, while any genuine marker/answer-letter damage (or a non-wrapper rewrite)
+still hard-fails. Use \`--allow-think-migration\` ONLY for this one-time
+wrapper-migration experiment, never as a way to wave through real trace edits.
+Also: \`dataset_audit.py\` HARD-FAILS (exit 1, independent of \`--strict-behavior\` and
+\`--allow-think-migration\`) on any row that is not the thinking-only shape — no
+\`<think>\` block, an unclosed/missing \`</think>\`, multiple \`<think>\` blocks, an
+\`ANSWER:\` before/inside \`<think>\`, more than one \`ANSWER:\` marker, or no \`ANSWER:\`
+line after \`</think>\` — so scrub the wrapped traces to exactly ONE closed
+\`<think>\` block then one trailing \`ANSWER:\` line before auditing.
 
 **Step 6. TRAIN — locked recipe.**
 \`\`\`bash
@@ -468,11 +497,15 @@ HARD GATES (system-enforced — you will see SystemExit messages if you violate 
   exp_016 -> ~0.13). See step 5.
 
 - THINK-HYGIENE GATE (ALWAYS on): \`dataset_audit.py\` hard-fails (exit 1) on any row
-  with an \`ANSWER:\` marker INSIDE a \`<think>\` block, or with more than one \`ANSWER:\`
-  marker. This fires regardless of \`--strict-behavior\` and regardless of whether
-  decontam/diversity pass. The eval scorer takes the FIRST \`^ANSWER:\` match, so an
-  in-think \`ANSWER:\` mis-scores the row even though the trailing one looks right —
-  scrub it upstream. See the THINKING-ONLY FORMAT note at the top and step 5.
+  that is not the thinking-only shape — NO \`<think>\` block (bare CoT / answer-only),
+  an unclosed/missing \`</think>\`, MULTIPLE \`<think>\` blocks, an \`ANSWER:\` marker
+  before/inside \`<think>\`, more than one \`ANSWER:\` marker, or no \`ANSWER:\` line after
+  \`</think>\`. Every target must be exactly ONE closed \`<think>...</think>\` block then
+  exactly ONE trailing \`ANSWER: <LETTER>\` line. This fires regardless of
+  \`--strict-behavior\`/\`--allow-think-migration\` and regardless of whether
+  decontam/diversity pass. The eval scorer takes the FIRST \`^ANSWER:\` match, so a
+  malformed row mis-scores even though the trailing line looks right — scrub it
+  upstream. See the THINKING-ONLY FORMAT note at the top and step 5.
 
 - The codex session may be respawned by solve.sh if you exit early. Treat each
   respawn as a CONTINUATION, not a fresh start. Read KNOWLEDGE.md, find your

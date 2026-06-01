@@ -385,12 +385,54 @@ def _prompt_key(row: dict) -> str:
         return normalize("\n".join(parts))
 
 
-def check_behavior(rows: list[dict], parent_rows: list[dict] | None) -> dict:
+_THINK_TAG_RE = re.compile(r"(?i)</?think>")
+
+
+def _is_pure_think_wrapper(child_text: str, parent_text: str) -> bool:
+    """True iff child_text is parent_text with ONLY a <think>...</think> wrapper
+    added around the reasoning, preserving the same final ANSWER letter.
+
+    The test UNWRAPS the child (removes the <think>/</think> TAGS but KEEPS the
+    reasoning they enclose), drops the ANSWER line (re-emitted canonically after
+    </think>), normalizes whitespace, and requires the result to equal the
+    parent under the same treatment; AND the final ANSWER letter must match.
+    Stripping <think>...</think> from the child must recover the parent's
+    reasoning text — i.e. the only edit was the wrapper, not content damage.
+    """
+    c_letter = answer_marker_letter(child_text)
+    p_letter = answer_marker_letter(parent_text)
+    # The final answer letter must survive the migration. A None on either side
+    # (no parseable letter) is NOT a pure wrapper — let the normal gates speak.
+    if c_letter is None or p_letter is None or c_letter != p_letter:
+        return False
+
+    def reasoning_core(text: str) -> str:
+        # Drop ANSWER: lines (re-emitted canonically after </think>) and the bare
+        # <think>/</think> tags — KEEPING the reasoning text — then collapse
+        # whitespace so the wrapper add/relocate is the only tolerated change.
+        body = ANSWER_MARKER_RE.sub("", text or "")
+        body = _THINK_TAG_RE.sub("", body)
+        return WS_RE.sub(" ", body).strip().lower()
+
+    return reasoning_core(child_text) == reasoning_core(parent_text)
+
+
+def check_behavior(
+    rows: list[dict],
+    parent_rows: list[dict] | None,
+    allow_think_migration: bool = False,
+) -> dict:
     """Detect format-collapse: missing ANSWER markers, letter-dist drift, mass rewrites.
 
     Always best-effort and never raises. Returns a report section with a
     `high_risk` bool + human-readable `reasons`. The caller decides whether
     high_risk forces a non-zero exit (only under --strict-behavior).
+
+    When `allow_think_migration` is set, the traces_changed_frac high_risk is
+    NOT counted as a hard-fail trigger IF the rewrites are PURE <think> wrappers
+    — i.e. for every changed-and-aligned row, stripping <think>...</think>
+    recovers the parent's reasoning text AND the final ANSWER letter is
+    unchanged. Genuine marker-rate / answer-letter damage still trips high_risk.
     """
     asst_texts = [extract_assistant_content(r) for r in rows]
     n = len(asst_texts)
@@ -404,37 +446,78 @@ def check_behavior(rows: list[dict], parent_rows: list[dict] | None) -> dict:
             dist[x] += 1
 
     # --- THINK-HYGIENE HARD GATE (independent of --strict-behavior) ----------
-    # The eval scorer reads the FIRST '^ANSWER:' match; answer_marker_letter()
-    # (the audit) reads the LAST. So a stray 'ANSWER:' INSIDE <think> passes
-    # this audit's marker check but silently mis-scores at eval. Likewise a row
-    # with MORE THAN ONE 'ANSWER:' marker means first!=last is possible. Both
-    # poison the first-match scorer, so we flag them ALWAYS, regardless of the
-    # advisory --strict-behavior switch. Only rows that actually contain a fully
-    # closed think block (both '<think>' and '</think>') are eligible — these
-    # are THINKING-ONLY targets whose required shape is exactly ONE 'ANSWER:'
-    # line, AFTER </think>, with NO 'ANSWER:' anywhere inside <think>.
-    answer_inside_think_rows: list[int] = []
-    multi_answer_marker_rows: list[int] = []
+    # Every THINKING-ONLY target MUST be exactly ONE closed <think>...</think>
+    # block followed by exactly ONE 'ANSWER: <LETTER>' line, AFTER </think>, with
+    # NO 'ANSWER:' anywhere inside <think>. We hard-fail (always, regardless of
+    # the advisory --strict-behavior switch) any row that deviates from that
+    # shape, because the eval scorer reads the FIRST '^ANSWER:' match while
+    # answer_marker_letter() (this audit) reads the LAST — so a malformed row can
+    # pass the marker check yet mis-score at eval. The required shape is REQUIRED:
+    #   * MISSING <think>      — bare CoT / 'ANSWER: A'-only is NOT thinking-only.
+    #   * MISSING/UNCLOSED </think> — an open <think> with no closer is malformed.
+    #   * MULTIPLE <think>     — more than one opener (or closer) is malformed.
+    #   * ANSWER not the single allowed line AFTER the single </think>:
+    #       - any 'ANSWER:' before/inside <think>, or
+    #       - more than one 'ANSWER:' marker in the row, or
+    #       - zero 'ANSWER:' markers after </think>.
+    # The existing in-think-ANSWER detection is preserved as one of these cases.
+    missing_think_rows: list[int] = []          # zero '<think>' openers
+    unclosed_think_rows: list[int] = []         # '<think>' present, no '</think>'
+    multi_think_rows: list[int] = []            # >1 '<think>' or >1 '</think>'
+    answer_inside_think_rows: list[int] = []    # 'ANSWER:' before/inside <think>
+    multi_answer_marker_rows: list[int] = []    # >1 'ANSWER:' marker in the row
+    missing_answer_after_think_rows: list[int] = []  # no 'ANSWER:' after </think>
     for idx, atext in enumerate(asst_texts):
-        if "<think>" not in atext or "</think>" not in atext:
+        n_open = atext.count("<think>")
+        n_close = atext.count("</think>")
+        # Shape gate 1: there MUST be exactly one closed <think> block.
+        if n_open == 0:
+            missing_think_rows.append(idx)
             continue
+        if n_close == 0:
+            unclosed_think_rows.append(idx)
+            continue
+        if n_open > 1 or n_close > 1:
+            multi_think_rows.append(idx)
+            # still inspect ANSWER placement below using the first </think>.
         before_close = atext.split("</think>", 1)[0]
+        after_close = atext.split("</think>", 1)[1]
+        all_answers = ANSWER_MARKER_RE.findall(atext)
+        # Shape gate 2: no 'ANSWER:' before/inside the (first) <think> block.
         if ANSWER_MARKER_RE.search(before_close):
             answer_inside_think_rows.append(idx)
-        if len(ANSWER_MARKER_RE.findall(atext)) > 1:
+        # Shape gate 3: exactly one 'ANSWER:' marker total.
+        if len(all_answers) > 1:
             multi_answer_marker_rows.append(idx)
+        # Shape gate 4: there IS an 'ANSWER:' line after the single </think>.
+        elif not ANSWER_MARKER_RE.search(after_close):
+            # (only flag the "missing after" case when there's exactly one or
+            # zero markers; >1 is already covered by multi_answer_marker_rows.)
+            missing_answer_after_think_rows.append(idx)
     think_hygiene_violation = bool(
-        answer_inside_think_rows or multi_answer_marker_rows
+        missing_think_rows
+        or unclosed_think_rows
+        or multi_think_rows
+        or answer_inside_think_rows
+        or multi_answer_marker_rows
+        or missing_answer_after_think_rows
     )
     think_hygiene_reason = ""
     if think_hygiene_violation:
         think_hygiene_reason = (
-            f"first-match scorer poison: {len(answer_inside_think_rows)} row(s) "
-            f"have an 'ANSWER:' marker INSIDE <think> and "
-            f"{len(multi_answer_marker_rows)} row(s) have >1 'ANSWER:' marker; "
-            "the eval scorer takes the FIRST ^ANSWER: match while this audit's "
-            "marker check takes the LAST, so these rows pass audit but mis-score "
-            "at eval"
+            "thinking-only shape violation: "
+            f"{len(missing_think_rows)} row(s) have NO <think> block, "
+            f"{len(unclosed_think_rows)} row(s) have an unclosed/missing </think>, "
+            f"{len(multi_think_rows)} row(s) have MULTIPLE <think> blocks, "
+            f"{len(answer_inside_think_rows)} row(s) have an 'ANSWER:' marker "
+            f"before/inside <think>, "
+            f"{len(multi_answer_marker_rows)} row(s) have >1 'ANSWER:' marker, "
+            f"{len(missing_answer_after_think_rows)} row(s) have NO 'ANSWER:' "
+            "line after </think>. Every target must be exactly ONE closed "
+            "<think>...</think> block then exactly ONE 'ANSWER: <LETTER>' line "
+            "(after </think>, none inside). The eval scorer takes the FIRST "
+            "^ANSWER: match while this audit's marker check takes the LAST, so a "
+            "malformed row can pass the marker check yet mis-score at eval."
         )
 
     reasons: list[str] = []
@@ -506,22 +589,60 @@ def check_behavior(rows: list[dict], parent_rows: list[dict] | None) -> dict:
                 p_index[key] = extract_assistant_content(r)
         aligned = 0
         changed = 0
+        changed_pure_wrapper = 0
+        changed_not_wrapper = 0
         for r, atext in zip(rows, asst_texts):
             key = _prompt_key(r)
             if key in p_index:
                 aligned += 1
                 if atext != p_index[key]:
                     changed += 1
+                    if _is_pure_think_wrapper(atext, p_index[key]):
+                        changed_pure_wrapper += 1
+                    else:
+                        changed_not_wrapper += 1
         changed_frac = (changed / aligned) if aligned else 0.0
         parent["aligned_rows"] = aligned
         parent["traces_changed"] = changed
         parent["traces_changed_frac"] = changed_frac
+        parent["traces_changed_pure_wrapper"] = changed_pure_wrapper
+        parent["traces_changed_not_wrapper"] = changed_not_wrapper
         if changed_frac > BEHAVIOR_TRACE_CHANGED_FRAC_MAX:
-            high_risk = True
-            reasons.append(
-                f"traces_changed_frac={changed_frac:.3f} ({changed}/{aligned} aligned "
-                f"rows rewritten) > {BEHAVIOR_TRACE_CHANGED_FRAC_MAX}"
+            # Under --allow-think-migration a mass rewrite is NOT a hard-fail IF
+            # EVERY changed row is a pure <think> wrapper (parent reasoning +
+            # same ANSWER letter recovered by stripping <think>). A single
+            # genuinely-rewritten row (changed_not_wrapper > 0) still trips it,
+            # so real marker/answer damage is never masked. The marker-rate and
+            # letter-distribution sub-checks (a)/(b) above are independent and
+            # still fire on genuine damage regardless of migration mode.
+            is_pure_migration = (
+                allow_think_migration and changed_not_wrapper == 0 and changed > 0
             )
+            if is_pure_migration:
+                parent["think_migration_allowed"] = True
+                reasons.append(
+                    f"traces_changed_frac={changed_frac:.3f} ({changed}/{aligned} "
+                    f"aligned rows rewritten) > {BEHAVIOR_TRACE_CHANGED_FRAC_MAX} "
+                    "but ALL changed rows are pure <think> wrappers (parent "
+                    "reasoning + same ANSWER letter preserved); allowed under "
+                    "--allow-think-migration (not counted as high_risk)"
+                )
+            else:
+                high_risk = True
+                detail = ""
+                if allow_think_migration:
+                    parent["think_migration_allowed"] = False
+                    detail = (
+                        f"; --allow-think-migration set but "
+                        f"{changed_not_wrapper} changed row(s) are NOT pure "
+                        "<think> wrappers (reasoning text or ANSWER letter "
+                        "changed), so the migration exemption does NOT apply"
+                    )
+                reasons.append(
+                    f"traces_changed_frac={changed_frac:.3f} ({changed}/{aligned} "
+                    f"aligned rows rewritten) > {BEHAVIOR_TRACE_CHANGED_FRAC_MAX}"
+                    f"{detail}"
+                )
 
     return {
         "high_risk": high_risk,
@@ -533,11 +654,21 @@ def check_behavior(rows: list[dict], parent_rows: list[dict] | None) -> dict:
         # THINK-HYGIENE HARD GATE (always enforced, independent of high_risk /
         # --strict-behavior). think_hygiene_violation True => audit MUST exit
         # non-zero. The *_rows lists are the offending row indices (capped for
-        # the report); the counts reflect ALL offenders.
+        # the report); the counts reflect ALL offenders. Every target MUST be
+        # exactly ONE closed <think>...</think> block then exactly ONE
+        # 'ANSWER: <LETTER>' line after </think>.
+        "missing_think_rows": missing_think_rows[:MAX_REPORTED_VIOLATIONS],
+        "missing_think_count": len(missing_think_rows),
+        "unclosed_think_rows": unclosed_think_rows[:MAX_REPORTED_VIOLATIONS],
+        "unclosed_think_count": len(unclosed_think_rows),
+        "multi_think_rows": multi_think_rows[:MAX_REPORTED_VIOLATIONS],
+        "multi_think_count": len(multi_think_rows),
         "answer_inside_think_rows": answer_inside_think_rows[:MAX_REPORTED_VIOLATIONS],
         "answer_inside_think_count": len(answer_inside_think_rows),
         "multi_answer_marker_rows": multi_answer_marker_rows[:MAX_REPORTED_VIOLATIONS],
         "multi_answer_marker_count": len(multi_answer_marker_rows),
+        "missing_answer_after_think_rows": missing_answer_after_think_rows[:MAX_REPORTED_VIOLATIONS],
+        "missing_answer_after_think_count": len(missing_answer_after_think_rows),
         "think_hygiene_violation": think_hygiene_violation,
         "think_hygiene_reason": think_hygiene_reason,
         "parent": parent,
@@ -589,6 +720,19 @@ def parse_args() -> argparse.Namespace:
             "to stderr and never changes the decontam/diversity pass/exit."
         ),
     )
+    p.add_argument(
+        "--allow-think-migration",
+        action="store_true",
+        help=(
+            "One-time bare-CoT -> thinking-only migration mode. The "
+            "traces_changed_frac mass-rewrite high_risk is NOT a hard fail when "
+            "EVERY changed-and-aligned row is a PURE <think> wrapper of its "
+            "parent (stripping <think>...</think> recovers the parent reasoning "
+            "AND the same final ANSWER letter is preserved). Genuine "
+            "marker-rate / answer-letter damage, or any non-wrapper rewrite, "
+            "still hard-fails. Use ONLY for the wrapper-migration experiment."
+        ),
+    )
     return p.parse_args()
 
 
@@ -636,7 +780,9 @@ def main() -> int:
             print(f"ERROR: parent file not found: {parent_path}", file=sys.stderr)
             return 2
         parent_rows = load_rows(parent_path)
-    behavior = check_behavior(rows, parent_rows)
+    behavior = check_behavior(
+        rows, parent_rows, allow_think_migration=args.allow_think_migration
+    )
 
     # IMPORTANT: behavior NEVER affects the decontam/diversity pass/exit unless
     # --strict-behavior is set. Existing gating is unchanged.
@@ -681,21 +827,43 @@ def main() -> int:
             )
 
     # THINK-HYGIENE HARD GATE: ALWAYS enforced, independent of --strict-behavior
-    # AND of the decontam/diversity pass. An 'ANSWER:' inside <think> or more
-    # than one 'ANSWER:' marker silently mis-scores at eval (FIRST-match scorer)
-    # while passing this audit's LAST-match marker check, so we refuse to allow
-    # training. This intentionally short-circuits before the normal pass/exit
-    # logic below so the advisory checks above can never mask it.
+    # AND of the decontam/diversity pass. Every target MUST be exactly ONE closed
+    # <think>...</think> block then exactly ONE 'ANSWER: <LETTER>' line after
+    # </think>. Bare CoT (no <think>), an unclosed/missing </think>, multiple
+    # <think> blocks, an 'ANSWER:' before/inside <think>, >1 'ANSWER:' marker, or
+    # no 'ANSWER:' after </think> all mis-score at eval (FIRST-match scorer) or
+    # are simply not the thinking-only shape, so we refuse to allow training.
+    # This intentionally short-circuits before the normal pass/exit logic below
+    # so the advisory checks above can never mask it.
     if behavior["think_hygiene_violation"]:
         print(
-            "AUDIT FAIL [THINK-HYGIENE HARD GATE]: first-match scorer poison "
+            "AUDIT FAIL [THINK-HYGIENE HARD GATE]: thinking-only shape violation "
             "(always enforced, independent of --strict-behavior):",
             file=sys.stderr,
         )
+        if behavior["missing_think_count"]:
+            print(
+                f"  {behavior['missing_think_count']} row(s) have NO <think> "
+                f"block (bare CoT / answer-only is not thinking-only) (indices: "
+                f"{behavior['missing_think_rows']})",
+                file=sys.stderr,
+            )
+        if behavior["unclosed_think_count"]:
+            print(
+                f"  {behavior['unclosed_think_count']} row(s) have an unclosed/"
+                f"missing </think> (indices: {behavior['unclosed_think_rows']})",
+                file=sys.stderr,
+            )
+        if behavior["multi_think_count"]:
+            print(
+                f"  {behavior['multi_think_count']} row(s) have MULTIPLE <think> "
+                f"blocks (indices: {behavior['multi_think_rows']})",
+                file=sys.stderr,
+            )
         if behavior["answer_inside_think_count"]:
             print(
                 f"  {behavior['answer_inside_think_count']} row(s) have an "
-                f"'ANSWER:' marker INSIDE <think> (indices: "
+                f"'ANSWER:' marker before/inside <think> (indices: "
                 f"{behavior['answer_inside_think_rows']})",
                 file=sys.stderr,
             )
@@ -706,12 +874,20 @@ def main() -> int:
                 f"{behavior['multi_answer_marker_rows']})",
                 file=sys.stderr,
             )
+        if behavior["missing_answer_after_think_count"]:
+            print(
+                f"  {behavior['missing_answer_after_think_count']} row(s) have "
+                f"NO 'ANSWER:' line after </think> (indices: "
+                f"{behavior['missing_answer_after_think_rows']})",
+                file=sys.stderr,
+            )
         print(
-            "  why: the eval scorer takes the FIRST '^ANSWER:' match while this "
-            "audit's marker check takes the LAST, so a stray in-think ANSWER "
-            "passes audit but mis-scores at eval. Scrub upstream so each "
-            "THINKING-ONLY target has exactly ONE 'ANSWER: <LETTER>' line AFTER "
-            "</think> and NONE inside <think>.",
+            "  why: every THINKING-ONLY target must be exactly ONE closed "
+            "<think>...</think> block then exactly ONE 'ANSWER: <LETTER>' line "
+            "AFTER </think> and NONE inside <think>. The eval scorer takes the "
+            "FIRST '^ANSWER:' match while this audit's marker check takes the "
+            "LAST, so a malformed row can pass the marker check yet mis-score at "
+            "eval. Scrub upstream (teacher_synth emits this shape by default).",
             file=sys.stderr,
         )
         return 1

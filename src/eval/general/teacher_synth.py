@@ -41,9 +41,11 @@ target is always
 inside <think>. The eval scorer takes the FIRST ^ANSWER: match while the audit
 guard takes the LAST, so a stray in-think ANSWER would pass audit but mis-score
 at eval; ensure_answer_line scrubs every ANSWER line out of the <think> body and
-re-emits a single canonical one after </think>. A teacher trace with no closed
-</think> is REJECTED (one retry, then the row is skipped — we do NOT synthesize
-a <think> wrapper around a trace that lacks one). enforce_seq_budget tail-trims
+re-emits a single canonical one after </think>. By default (--require-think) a
+teacher trace with no closed </think> is REJECTED (one retry, then the row is
+skipped — we do NOT synthesize a <think> wrapper around a trace that lacks one);
+with --no-require-think the bare reasoning is WRAPPED in <think>...</think>
+instead of rejected. enforce_seq_budget tail-trims
 the <think> body (never the ANSWER line) so prompt + target fits MAX_SEQ_LEN=8192
 (TRL right-truncates the tail, which would otherwise drop the ANSWER line).
 
@@ -170,16 +172,27 @@ GENERATE_SYSTEM = (
 )
 
 
-def build_generate_user(subfield: str) -> str:
+def build_generate_user(subfield: str, topic: str | None = None) -> str:
     # Use the SAME line-anchored delimiter shape the rationale path already
     # round-trips (plain question text + 'A) ...' option lines + a final
     # 'ANSWER: <LETTER>' line, parsed by _parse_templated_mcq + ANSWER_RE).
     # Strict JSON failed in the V4 pilot because the teacher emits a long
     # <think>...</think> preamble + prose, so no JSON ever parsed. Delimiters
     # survive that prose: we strip <think> and key off the anchors.
+    #
+    # `topic` is the high-level domain guidance from --topic; `subfield` is the
+    # rotated SUBFIELDS entry that keeps the batch diverse. We constrain the
+    # question to the subfield (for diversity) WITHIN the requested topic so
+    # --topic actually steers generation instead of being ignored.
+    if topic:
+        scope = (
+            f"the subfield: {subfield} (within the broader topic area: {topic})"
+        )
+    else:
+        scope = f"the subfield: {subfield}"
     return (
         f"Create ONE original, hard, graduate-level multiple-choice question in "
-        f"the subfield: {subfield}.\n\n"
+        f"{scope}.\n\n"
         "Requirements:\n"
         "- Exactly four answer options labelled A) B) C) D), one correct.\n"
         "- Graduate difficulty (quantitative or mechanistic, not trivia).\n"
@@ -312,7 +325,7 @@ def healthcheck(client, model) -> None:
         sys.exit(3)
 
 
-def ensure_answer_line(text: str) -> str | None:
+def ensure_answer_line(text: str, require_think: bool = True) -> str | None:
     """Normalise a trace into the canonical THINKING-ONLY target shape and the
     single choke point used by BOTH rationale and generate modes.
 
@@ -323,16 +336,38 @@ def ensure_answer_line(text: str) -> str | None:
     ^ANSWER: match while the audit guard takes the LAST — so a stray in-think
     ANSWER passes audit but mis-scores at eval; we scrub it upstream here.)
 
-    Returns the canonical text, or None if there is NO '</think>' (missing
-    closer / unclosed <think>) or no valid A-D answer letter. Per LOCKED
-    decision the caller retries once then SKIPS on None; we do NOT synthesize a
-    <think> wrapper for a teacher trace that lacks one.
+    When `require_think` (default, matches --require-think): a trace with NO
+    '</think>' (missing closer / unclosed <think>) is REJECTED — return None.
+    Per LOCKED decision the caller retries once then SKIPS on None; we do NOT
+    synthesize a <think> wrapper for a teacher trace that lacks one.
+
+    When `require_think` is False (--no-require-think): a trace lacking a closed
+    </think> is NOT rejected; instead the bare reasoning (everything before the
+    final ANSWER line, with any stray ANSWER lines scrubbed) is WRAPPED in a
+    '<think>...</think>' block so the output is still the canonical shape.
+
+    Returns the canonical text, or None if there is no valid A-D answer letter.
     """
     low = text.lower()
     close_idx = low.rfind("</think>")
     if close_idx == -1:
-        # Missing closer or unclosed <think>: reject (caller retries once -> skip).
-        return None
+        if require_think:
+            # Missing closer / unclosed <think>: reject (caller retries -> skip).
+            return None
+        # --no-require-think: synthesize a <think> wrapper around the bare
+        # reasoning. Treat the whole text as the think body: everything up to a
+        # final ANSWER line is the reasoning; the last A-D ANSWER match is the
+        # letter. Drop any dangling unclosed '<think>' opener from the body.
+        all_matches = ANSWER_RE.findall(text)
+        if not all_matches:
+            return None
+        letter = all_matches[-1].upper()
+        if letter not in LETTERS:
+            return None
+        think_inner = ANSWER_LINE_LOOSE_RE.sub("", text)
+        # Strip any dangling/unclosed <think> opener tags from the body.
+        think_inner = re.sub(r"(?i)</?think>", "", think_inner)
+        return f"<think>\n{think_inner.strip()}\n</think>\n\nANSWER: {letter}"
     open_idx = low.find("<think>")
     inner_start = open_idx + len("<think>") if open_idx != -1 else 0
     think_inner = text[inner_start:close_idx]
@@ -492,7 +527,7 @@ def enforce_seq_budget(
 
 # --- per-row workers ---------------------------------------------------------
 def do_rationale(client, model, row, *, max_tokens, temperature,
-                 max_seq_len=MAX_SEQ_LEN) -> dict | None:
+                 max_seq_len=MAX_SEQ_LEN, require_think=True) -> dict | None:
     qo = extract_question_options(row)
     if qo is None:
         raise ValueError("could not extract question/options from row")
@@ -504,15 +539,17 @@ def do_rationale(client, model, row, *, max_tokens, temperature,
     chat_max_tokens = min(max_tokens, max(256, max_seq_len - prompt_tokens - 48))
 
     # The teacher emits its OWN <think>...</think> (per RATIONALE_SYSTEM); pass
-    # the raw response straight into the think-aware choke point. A bad trace
-    # (missing </think>) -> ensure_answer_line None -> ONE retry, then skip.
+    # the raw response straight into the think-aware choke point. With
+    # require_think (default) a bad trace (missing </think>) -> ensure_answer_line
+    # None -> ONE retry, then skip. With --no-require-think the bare reasoning is
+    # wrapped in <think> instead of rejected (so a missing closer is tolerated).
     trace = None
     for _attempt in range(2):
         raw = chat(
             client, model, RATIONALE_SYSTEM, user_mcq,
             max_tokens=chat_max_tokens, temperature=temperature,
         )
-        trace = ensure_answer_line(raw)
+        trace = ensure_answer_line(raw, require_think=require_think)
         if trace is not None:
             break
     if trace is None:
@@ -551,9 +588,9 @@ def blind_resolve_letter(client, model, question, options, *, max_tokens) -> str
 
 def do_generate(client, model, subfield, *, max_tokens, temperature,
                 avoid_keys=None, self_consistency=True,
-                max_seq_len=MAX_SEQ_LEN) -> dict | None:
+                max_seq_len=MAX_SEQ_LEN, topic=None, require_think=True) -> dict | None:
     raw = chat(
-        client, model, GENERATE_SYSTEM, build_generate_user(subfield),
+        client, model, GENERATE_SYSTEM, build_generate_user(subfield, topic=topic),
         max_tokens=max_tokens, temperature=temperature,
     )
     question, options, reasoning, answer = parse_generated_item(raw)
@@ -580,9 +617,12 @@ def do_generate(client, model, subfield, *, max_tokens, temperature,
     user_mcq = build_eval_template(question, options)
     # parse_generated_item returns plain-prose REASONING (the generate format has
     # no <think> tags); WRAP it so the target is THINKING-ONLY shaped, then run
-    # it through the same think-aware choke point both modes share.
+    # it through the same think-aware choke point both modes share. The wrapper
+    # always produces a closed </think>, so require_think is satisfied regardless
+    # of the flag; we thread it through for a consistent contract.
     assistant = ensure_answer_line(
-        f"<think>\n{reasoning.strip()}\n</think>\n\nANSWER: {answer}"
+        f"<think>\n{reasoning.strip()}\n</think>\n\nANSWER: {answer}",
+        require_think=require_think,
     )
     if assistant is None:
         raise ValueError("could not assemble a valid answer line for generated item")
@@ -747,6 +787,7 @@ def run(args) -> int:
         worker = lambda r: do_rationale(  # noqa: E731
             client, model, r, max_tokens=args.max_tokens,
             temperature=args.temperature, max_seq_len=args.max_seq_len,
+            require_think=args.require_think,
         )
     else:  # generate
         avoid_keys = load_avoid_keys(args.avoid) if args.avoid else None
@@ -769,7 +810,8 @@ def run(args) -> int:
         worker = lambda s: do_generate(  # noqa: E731
             client, model, s, max_tokens=args.max_tokens, temperature=args.temperature,
             avoid_keys=avoid_keys, self_consistency=self_consistency,
-            max_seq_len=args.max_seq_len,
+            max_seq_len=args.max_seq_len, topic=args.topic,
+            require_think=args.require_think,
         )
 
     total = len(jobs)
@@ -855,8 +897,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--require-think", dest="require_think",
                    action=argparse.BooleanOptionalAction, default=True,
                    help="Require a closed <think>...</think> in the target shape "
-                        "(default True). A trace missing </think> is rejected "
-                        "(one retry, then skip).")
+                        "(default True): a trace missing </think> is rejected "
+                        "(one retry, then skip). With --no-require-think the bare "
+                        "reasoning is instead WRAPPED in <think>...</think> so the "
+                        "output stays thinking-only-shaped (leave ON for "
+                        "thinking-only training).")
     p.add_argument("--temperature", type=float, default=None,
                    help="Default 0.2 (rationale) / 0.7 (generate).")
     p.add_argument("--progress-every", type=int, default=10,

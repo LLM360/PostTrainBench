@@ -25,9 +25,13 @@ Outputs:
 
 Exit codes:
     0  success (verdicts written)
-    2  usage / IO error (bad args, unreadable input, no rows, teacher unreachable)
-Per-row failures never abort the run: the row is marked keep=false with
-reason "judge_error" and processing continues.
+    2  usage / IO error (bad args, unreadable input, no rows, teacher unreachable),
+       OR the fraction of UNPARSEABLE judge replies exceeds --max-unparseable-frac
+       (fail loud instead of silently keeping 0 rows)
+Per-row CALL failures never abort the run: the row is marked keep=false with
+reason "judge_error" and processing continues. PARSE failures (e.g. an
+unterminated <think> that ate the token budget, or no JSON / no yes-no signal)
+are tracked separately and trip the fail-loud gate above.
 
 Env:
     TEACHER_VLLM_URL    base_url for OpenAI-compatible endpoint (required)
@@ -54,9 +58,15 @@ except ImportError:  # pragma: no cover - exercised only when dep missing
 
 # --- Tunables ---------------------------------------------------------------
 QUESTION_TRUNC_CHARS = 800     # keep prompts tiny / cheap
-JUDGE_MAX_TOKENS = 120         # short yes/no + reason only
+JUDGE_MAX_TOKENS = 3072        # default budget; must survive a <think> preamble
 JUDGE_TEMPERATURE = 0.0        # deterministic
 REASON_MAX_WORDS = 15
+
+# Sentinel reason returned by parse_verdict() when the reply could not be parsed
+# at all (unterminated <think>, no JSON, or no yes-no signal). DISTINCT from a
+# legitimate keep=false so the fail-loud gate can count true parse failures
+# instead of silently dropping every row.
+_PARSE_FAILURE = "__parse_failure__"
 # Fields searched (in order) when a row has no "messages" array.
 RAW_TEXT_FIELDS = ("question", "problem", "prompt", "text", "input", "query")
 
@@ -188,25 +198,56 @@ def _clip_reason(reason: str) -> str:
     return " ".join(words)
 
 
+def strip_think_preamble(text: str) -> tuple[str, bool]:
+    """Strip a reasoning <think>...</think> preamble from a teacher reply.
+
+    Returns ``(cleaned_text, ok)``. Everything up to and including the LAST
+    ``</think>`` is removed. If a ``<think>`` opened but never closed (the think
+    ate the whole budget so no JSON survives), ``ok`` is False to signal a PARSE
+    FAILURE rather than silently treating the truncation as keep=false. With no
+    ``<think>`` at all, the original text is returned unchanged with ``ok=True``.
+    """
+    if not text:
+        return text, True
+    low = text.lower()
+    close_idx = low.rfind("</think>")
+    if close_idx != -1:
+        # Drop everything up to and including the last closing tag.
+        return text[close_idx + len("</think>"):].strip(), True
+    # No closing tag. If an opening tag exists, the think block was never
+    # terminated -> truncated budget -> hard parse failure.
+    if "<think>" in low:
+        return "", False
+    return text, True
+
+
 def parse_verdict(text: str) -> tuple[bool, str]:
     """Robustly parse the teacher reply into (keep, reason).
 
-    Tries strict JSON first, then a brace-substring JSON, then a keyword scan.
+    Order: strip any <think> preamble, then strict JSON, then the LAST balanced
+    {...} object, then a tolerant json-repair fallback, then a keyword scan.
+
+    A return of ``(False, _PARSE_FAILURE)`` means the reply could not be parsed
+    at all (distinct from a legitimate keep=false verdict). An unterminated
+    <think> is one such hard parse failure.
     """
     if text is None:
-        return False, "judge_error"
-    raw = text.strip()
+        return False, _PARSE_FAILURE
+
+    cleaned, ok = strip_think_preamble(text)
+    if not ok:
+        return False, _PARSE_FAILURE
+
+    raw = cleaned.strip()
     if not raw:
-        return False, "judge_error"
+        return False, _PARSE_FAILURE
 
     # 1) Strict JSON.
     obj = _try_json(raw)
-    # 2) JSON substring (model wrapped it in prose / code fences).
+    # 2) LAST balanced {...} object (scan back from the last '{'), with a
+    #    tolerant json-repair fallback on the trimmed candidates.
     if obj is None:
-        start = raw.find("{")
-        end = raw.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            obj = _try_json(raw[start : end + 1])
+        obj = _extract_last_json_object(raw)
 
     if isinstance(obj, dict) and "keep" in obj:
         keep = _coerce_bool(obj.get("keep"))
@@ -228,8 +269,68 @@ def parse_verdict(text: str) -> tuple[bool, str]:
         return False, _clip_reason(raw)
     if has_yes and not has_no:
         return True, _clip_reason(raw)
-    # Ambiguous / unparseable -> conservative reject.
-    return False, "unparseable_verdict"
+    # Ambiguous / unparseable -> hard parse failure (counts toward fail-loud).
+    return False, _PARSE_FAILURE
+
+
+def _extract_last_json_object(raw: str) -> Any:
+    """Find the LAST balanced {...} object in ``raw`` and json.loads it.
+
+    Scans backward from the last '{' so trailing JSON wins over any earlier
+    braces in prose. Falls back to a lightweight json-repair (strip trailing
+    commas) on the trimmed candidate, then to the outermost-brace span.
+    """
+    # Candidate '{' start positions, last-first, plus the outermost-brace span
+    # as a final fallback (handles odd nesting / fences).
+    starts = [i for i, ch in enumerate(raw) if ch == "{"]
+    candidates = [_balanced_object_at(raw, s) for s in reversed(starts)]
+    first, last = raw.find("{"), raw.rfind("}")
+    if first != -1 and last > first:
+        candidates.append(raw[first : last + 1])
+    for cand in candidates:
+        if cand is None:
+            continue
+        obj = _try_json(cand) or _try_json(_repair_json(cand))
+        if isinstance(obj, dict):
+            return obj
+    return None
+
+
+def _balanced_object_at(raw: str, start: int) -> str | None:
+    """Return the balanced {...} substring beginning at ``start`` (or None).
+
+    Brace-counts while skipping over string literals so braces inside string
+    values do not unbalance the scan.
+    """
+    depth = 0
+    in_str = False
+    escape = False
+    for i in range(start, len(raw)):
+        ch = raw[i]
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return raw[start : i + 1]
+    return None
+
+
+def _repair_json(s: str) -> str:
+    """Lightweight json-repair: strip trailing commas before } or ]."""
+    import re
+
+    return re.sub(r",\s*([}\]])", r"\1", s.strip())
 
 
 def _try_json(s: str) -> Any:
@@ -258,23 +359,54 @@ def judge_one(
     model: str,
     question: str,
     criterion: str,
+    judge_max_tokens: int = JUDGE_MAX_TOKENS,
 ) -> tuple[bool, str]:
     if not question:
         return False, "no_question_text"
     try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": build_user_prompt(question, criterion)},
-            ],
-            max_tokens=JUDGE_MAX_TOKENS,
-            temperature=JUDGE_TEMPERATURE,
+        resp = _create_judge_completion(
+            client, model, question, criterion, judge_max_tokens
         )
         content = resp.choices[0].message.content if resp.choices else ""
         return parse_verdict(content or "")
     except Exception:  # noqa: BLE001 - per-row failures must not abort the batch
         return False, "judge_error"
+
+
+def _create_judge_completion(
+    client: "openai.OpenAI",
+    model: str,
+    question: str,
+    criterion: str,
+    judge_max_tokens: int,
+):
+    """Issue the judge chat call with a raised token budget.
+
+    Best-effort: also try to pass a vendor "no-think" hint via extra_body so the
+    reasoning preamble is suppressed and the JSON survives the budget. The hint
+    is NOT required — strip_think_preamble() handles the <think> block when it is
+    emitted anyway — so if the server rejects the extra field we retry without it.
+    """
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": build_user_prompt(question, criterion)},
+    ]
+    kw = dict(
+        model=model,
+        messages=messages,
+        max_tokens=judge_max_tokens,
+        temperature=JUDGE_TEMPERATURE,
+    )
+    # extra_body chat_template_kwargs.enable_thinking=False is the vLLM/MiniMax
+    # convention for disabling the <think> preamble. Purely advisory: on any
+    # failure (TypeError from an old client, or a server rejecting the field)
+    # retry plain, since strip_think_preamble() handles <think> regardless.
+    try:
+        return client.chat.completions.create(
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}}, **kw
+        )
+    except Exception:  # noqa: BLE001 - hint unsupported; retry without it.
+        return client.chat.completions.create(**kw)
 
 
 # --- CLI --------------------------------------------------------------------
@@ -308,6 +440,20 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Also write <out>.kept.jsonl with only kept rows (schema-preserving).",
     )
+    p.add_argument(
+        "--judge-max-tokens",
+        type=int,
+        default=JUDGE_MAX_TOKENS,
+        help="Token budget for each judge call; must exceed any <think> preamble "
+        "or the JSON verdict gets truncated and unparseable.",
+    )
+    p.add_argument(
+        "--max-unparseable-frac",
+        type=float,
+        default=0.4,
+        help="Fail loud (exit 2) if the fraction of UNPARSEABLE judge replies "
+        "exceeds this (e.g. <think> ate the token budget). 0..1.",
+    )
     return p.parse_args()
 
 
@@ -318,6 +464,12 @@ def main() -> int:
         return 2
     if args.max_workers < 1:
         sys.stderr.write("ERROR: --max-workers must be >= 1.\n")
+        return 2
+    if args.judge_max_tokens < 1:
+        sys.stderr.write("ERROR: --judge-max-tokens must be >= 1.\n")
+        return 2
+    if not (0.0 <= args.max_unparseable_frac <= 1.0):
+        sys.stderr.write("ERROR: --max-unparseable-frac must be in [0, 1].\n")
         return 2
 
     in_path = Path(args.in_path)
@@ -334,7 +486,14 @@ def main() -> int:
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         future_to_idx = {
-            pool.submit(judge_one, client, model, questions[i], args.criterion): i
+            pool.submit(
+                judge_one,
+                client,
+                model,
+                questions[i],
+                args.criterion,
+                args.judge_max_tokens,
+            ): i
             for i in range(len(rows))
         }
         done = 0
@@ -348,6 +507,24 @@ def main() -> int:
             if done % max(1, args.batch) == 0:
                 sys.stderr.write(f"  judged {done}/{len(rows)}...\n")
                 sys.stderr.flush()
+
+    # FAIL LOUD: count true parse failures (unterminated <think> / no JSON / no
+    # yes-no signal) separately from legitimate verdicts and from call errors,
+    # then abort if they dominate instead of silently keeping 0 rows.
+    n = len(rows)
+    unparseable = sum(1 for _keep, reason in verdicts if reason == _PARSE_FAILURE)
+    unparseable_frac = unparseable / n if n else 0.0
+    if unparseable_frac > args.max_unparseable_frac:
+        sys.stderr.write(
+            "ERROR: judge produced unparseable replies for "
+            f"{unparseable}/{n} rows ({unparseable_frac:.1%}), exceeding "
+            f"--max-unparseable-frac={args.max_unparseable_frac:.2f}.\n"
+            "  Likely cause: the model's <think> reasoning preamble exhausted "
+            "the token budget so the JSON verdict was truncated.\n"
+            f"  Try raising --judge-max-tokens (currently {args.judge_max_tokens}) "
+            "and/or ensure the no-think hint is honored by the endpoint.\n"
+        )
+        return 2
 
     # Write augmented verdicts.
     kept_count = 0

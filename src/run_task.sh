@@ -163,6 +163,16 @@ if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ]; then
     SHARED_LOG_DIR_HOST="${POST_TRAIN_BENCH_RESULTS_DIR}/data_eng_shared/${EVALUATION_TASK}_${RESULT_PREFIX_SAFE}"
     mkdir -p "${SHARED_LOG_DIR_HOST}"
     SHARED_LOG_CSV_CONTAINER="/shared_log/shared_log.csv"
+    # DURABILITY (never lose expensive work): the agent's experiments/ tree —
+    # mined datasets, KNOWLEDGE.md, per-experiment trained models — is the most
+    # expensive output of a multi-hour run. Historically it lived only in the
+    # node-local /tmp job_dir and was copied to Weka by a SINGLE end-of-run step,
+    # so an unclean crash / SLURM eviction / timeout lost ALL of it. Instead we
+    # WRITE IT THROUGH to durable Weka storage live, via a bind-mount (the same
+    # pattern that already persists the shared log). Now a failure at any point
+    # loses at most the single file mid-write — never the accumulated work.
+    EXPERIMENTS_DIR_HOST="${EVAL_DIR}/experiments_live"
+    mkdir -p "${EXPERIMENTS_DIR_HOST}"
 fi
 
 # Build the data-engineering-only extra args. These are appended to both the
@@ -199,6 +209,14 @@ if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ]; then
     )
     if [ -n "${SHARED_LOG_DIR_HOST:-}" ] && [ -d "${SHARED_LOG_DIR_HOST}" ]; then
         SOLVE_EXTRA_BINDS+=( --bind "${SHARED_LOG_DIR_HOST}:/shared_log" )
+    fi
+    # DURABILITY: write the agent's experiments/ tree straight to Weka. The
+    # bind targets /home/ben/task/experiments (the dir created at job-dir setup),
+    # so apptainer applies it over the node-local --home overlay and every
+    # dataset / KNOWLEDGE.md line / trained model lands on persistent storage as
+    # it is written. Scoped to data-eng runs only; default-prompt runs unaffected.
+    if [ -n "${EXPERIMENTS_DIR_HOST:-}" ] && [ -d "${EXPERIMENTS_DIR_HOST}" ]; then
+        SOLVE_EXTRA_BINDS+=( --bind "${EXPERIMENTS_DIR_HOST}:/home/ben/task/experiments" )
     fi
     if [ -n "${POSTTRAIN_ENV_DIR:-}" ] && [ -d "${POSTTRAIN_ENV_DIR}" ]; then
         SOLVE_EXTRA_BINDS+=( --bind "${POSTTRAIN_ENV_DIR}:/opt/env" )
@@ -365,17 +383,24 @@ fi
 # the notes, audit reports, manifests, and the experiment index survive even
 # if downstream cleanup misbehaves. Only applies to data-eng runs (the
 # experiments/ tree does not exist on default-prompt runs).
-if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ] && [ -d "${JOB_DIR}/task/experiments" ]; then
+# Curate the small, browsable experiment_notes/ view. Read from the durable
+# write-through dir (EXPERIMENTS_DIR_HOST on Weka) when set — the bind leaves the
+# node-local ${JOB_DIR}/task/experiments empty — falling back to the legacy
+# node-local path for non-bound/older runs. NOTE: even if this curation step is
+# skipped on an unclean crash, the FULL experiments tree already persists in
+# EXPERIMENTS_DIR_HOST (experiments_live/); nothing expensive is lost.
+SRC_EXP="${EXPERIMENTS_DIR_HOST:-${JOB_DIR}/task/experiments}"
+if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ] && [ -d "${SRC_EXP}" ]; then
     mkdir -p "$EVAL_DIR/experiment_notes"
-    if [ -f "${JOB_DIR}/task/experiments/index.csv" ]; then
-        cp "${JOB_DIR}/task/experiments/index.csv" "$EVAL_DIR/experiment_notes/index.csv"
+    if [ -f "${SRC_EXP}/index.csv" ]; then
+        cp "${SRC_EXP}/index.csv" "$EVAL_DIR/experiment_notes/index.csv"
     fi
     # V2: the accumulating KNOWLEDGE.md is the single most valuable
     # artifact for cross-experiment learning. Save it alongside index.csv.
-    if [ -f "${JOB_DIR}/task/experiments/KNOWLEDGE.md" ]; then
-        cp "${JOB_DIR}/task/experiments/KNOWLEDGE.md" "$EVAL_DIR/experiment_notes/KNOWLEDGE.md"
+    if [ -f "${SRC_EXP}/KNOWLEDGE.md" ]; then
+        cp "${SRC_EXP}/KNOWLEDGE.md" "$EVAL_DIR/experiment_notes/KNOWLEDGE.md"
     fi
-    for exp_dir in "${JOB_DIR}/task/experiments"/exp_*; do
+    for exp_dir in "${SRC_EXP}"/exp_*; do
         [ -d "$exp_dir" ] || continue
         exp_name=$(basename "$exp_dir")
         mkdir -p "$EVAL_DIR/experiment_notes/$exp_name"

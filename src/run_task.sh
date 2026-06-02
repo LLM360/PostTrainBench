@@ -163,6 +163,11 @@ if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ]; then
     SHARED_LOG_DIR_HOST="${POST_TRAIN_BENCH_RESULTS_DIR}/data_eng_shared/${EVALUATION_TASK}_${RESULT_PREFIX_SAFE}"
     mkdir -p "${SHARED_LOG_DIR_HOST}"
     SHARED_LOG_CSV_CONTAINER="/shared_log/shared_log.csv"
+    # DURABILITY: write the agent's experiments/ tree (datasets, KNOWLEDGE.md,
+    # trained models) straight to Weka via a live bind-mount, so an unclean
+    # crash / eviction / timeout can't lose accumulated work.
+    EXPERIMENTS_DIR_HOST="${EVAL_DIR}/experiments_live"
+    mkdir -p "${EXPERIMENTS_DIR_HOST}"
 fi
 
 # Build the data-engineering-only extra args. These are appended to both the
@@ -199,6 +204,13 @@ if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ]; then
     )
     if [ -n "${SHARED_LOG_DIR_HOST:-}" ] && [ -d "${SHARED_LOG_DIR_HOST}" ]; then
         SOLVE_EXTRA_BINDS+=( --bind "${SHARED_LOG_DIR_HOST}:/shared_log" )
+    fi
+    # DURABILITY: write the agent's experiments/ tree straight to Weka via a
+    # bind over the node-local --home overlay. Bind it for BOTH solve and judge:
+    # the judge audits the same experiments/exp_* tree the solve produced.
+    if [ -n "${EXPERIMENTS_DIR_HOST:-}" ] && [ -d "${EXPERIMENTS_DIR_HOST}" ]; then
+        SOLVE_EXTRA_BINDS+=( --bind "${EXPERIMENTS_DIR_HOST}:/home/ben/task/experiments" )
+        JUDGE_EXTRA_BINDS+=( --bind "${EXPERIMENTS_DIR_HOST}:/home/ben/task/experiments" )
     fi
     if [ -n "${POSTTRAIN_ENV_DIR:-}" ] && [ -d "${POSTTRAIN_ENV_DIR}" ]; then
         SOLVE_EXTRA_BINDS+=( --bind "${POSTTRAIN_ENV_DIR}:/opt/env" )
@@ -332,6 +344,16 @@ python agents/codex/human_readable_trace.py "${EVAL_DIR}/judge_output.json" -o "
 cp "${JOB_DIR}/task/contamination_judgement.txt" "${EVAL_DIR}/contamination_judgement.txt"
 cp "${JOB_DIR}/task/disallowed_model_judgement.txt" "${EVAL_DIR}/disallowed_model_judgement.txt"
 
+# Container writes went to EXPERIMENTS_DIR_HOST (bind); the host placeholder is
+# empty. Point it at the durable tree so a relative final_model symlink and the
+# task copy below resolve on the host. Ordering matters: this runs AFTER the
+# judge (whose JUDGE_EXTRA_BINDS needs a real dir destination, not a symlink, to
+# mount cleanly) and BEFORE final_model handling / the bulk task copy.
+if [ -n "${EXPERIMENTS_DIR_HOST:-}" ] && [ -d "${EXPERIMENTS_DIR_HOST}" ] && [ ! -L "${JOB_DIR}/task/experiments" ]; then
+    rm -rf "${JOB_DIR}/task/experiments"
+    ln -sfn "${EXPERIMENTS_DIR_HOST}" "${JOB_DIR}/task/experiments"
+fi
+
 echo "============================="
 echo "======== CLEANING UP ========"
 echo "============================="
@@ -365,17 +387,21 @@ fi
 # the notes, audit reports, manifests, and the experiment index survive even
 # if downstream cleanup misbehaves. Only applies to data-eng runs (the
 # experiments/ tree does not exist on default-prompt runs).
-if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ] && [ -d "${JOB_DIR}/task/experiments" ]; then
+# Curate the browsable experiment_notes/ view. Read from the durable bind dir
+# (EXPERIMENTS_DIR_HOST) when set — the bind leaves the node-local path empty —
+# falling back to the legacy node-local path for non-bound/older runs.
+SRC_EXP="${EXPERIMENTS_DIR_HOST:-${JOB_DIR}/task/experiments}"
+if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ] && [ -d "${SRC_EXP}" ]; then
     mkdir -p "$EVAL_DIR/experiment_notes"
-    if [ -f "${JOB_DIR}/task/experiments/index.csv" ]; then
-        cp "${JOB_DIR}/task/experiments/index.csv" "$EVAL_DIR/experiment_notes/index.csv"
+    if [ -f "${SRC_EXP}/index.csv" ]; then
+        cp "${SRC_EXP}/index.csv" "$EVAL_DIR/experiment_notes/index.csv"
     fi
     # V2: the accumulating KNOWLEDGE.md is the single most valuable
     # artifact for cross-experiment learning. Save it alongside index.csv.
-    if [ -f "${JOB_DIR}/task/experiments/KNOWLEDGE.md" ]; then
-        cp "${JOB_DIR}/task/experiments/KNOWLEDGE.md" "$EVAL_DIR/experiment_notes/KNOWLEDGE.md"
+    if [ -f "${SRC_EXP}/KNOWLEDGE.md" ]; then
+        cp "${SRC_EXP}/KNOWLEDGE.md" "$EVAL_DIR/experiment_notes/KNOWLEDGE.md"
     fi
-    for exp_dir in "${JOB_DIR}/task/experiments"/exp_*; do
+    for exp_dir in "${SRC_EXP}"/exp_*; do
         [ -d "$exp_dir" ] || continue
         exp_name=$(basename "$exp_dir")
         mkdir -p "$EVAL_DIR/experiment_notes/$exp_name"
@@ -402,6 +428,17 @@ if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ] && [ -d "${JOB_DIR}/task/e
 fi
 
 python containers/delete_hf_models.py "${JOB_DIR}/task"
+
+# Before the bulk task/ copy, drop symlinks that would dangle in $EVAL_DIR:
+# the experiments symlink (full tree already in experiments_live/ + notes) and,
+# if final_model was a symlink into experiments/ (already promoted via cp -aH
+# above), the now-orphaned final_model link. A real final_model dir is kept.
+if [ -L "${JOB_DIR}/task/final_model" ]; then
+    rm -f "${JOB_DIR}/task/final_model"
+fi
+if [ -L "${JOB_DIR}/task/experiments" ]; then
+    rm -f "${JOB_DIR}/task/experiments"
+fi
 
 cp -r "${JOB_DIR}/task" "$EVAL_DIR/task"
 

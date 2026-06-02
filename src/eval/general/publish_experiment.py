@@ -137,15 +137,10 @@ PROMOTION_MARGIN_FLOOR = _env_float("PROMOTION_MARGIN_FLOOR", 0.015)
 PROMOTION_STD_K = _env_float("PROMOTION_STD_K", 1.0)
 
 # --- LOCKED-RECIPE GATE (data-is-the-only-variable enforcement) -------------
-# Mirror of the locked constants in train_sft.py. Training DEPTH (epochs) and
-# every hyperparameter below are FIXED so a published experiment's outcome is
-# attributable to the DATA, not a training-duration or hyperparameter tune.
-# train_sft.py records these in each final_model*/train_manifest.json; the gate
-# (_check_locked_recipe) REFUSES to publish any experiment whose manifest
-# deviates — catching an agent that edited its train_sft.py copy, set
-# $POSTTRAIN_FIXED_EPOCHS, or otherwise tuned depth/hyperparameters.
-# KEEP IN SYNC with train_sft.py. `seed` is intentionally NOT pinned: it is the
-# across-seed noise estimator for the promotion margin, not an optimization knob.
+# INVARIANT: depth (epochs) + hyperparameters are FIXED so outcome is
+# attributable to the DATA. _check_locked_recipe refuses any train_manifest.json
+# deviating from these. KEEP IN SYNC with FIXED_EPOCHS_CANONICAL in train_sft.py
+# (update BOTH constants). `seed` is NOT pinned (noise estimator, not a knob).
 CANONICAL_FIXED_EPOCHS = 20
 CANONICAL_HYPERPARAMS = {
     "lora_r": 16,
@@ -1569,23 +1564,13 @@ def _persist_promoted_data(
 def _check_locked_recipe(exp_dir: Path, promoting: bool) -> None:
     """HARD GATE: every trained model under exp_dir must use the locked recipe.
 
-    Training DEPTH (epochs) and all hyperparameters are FIXED so a published
-    experiment's outcome is attributable to the DATA, not a training-duration or
-    hyperparameter tune. We read every train_manifest.json train_sft.py wrote
-    (final_model/, final_model_seed2/, ...) and refuse on ANY deviation from
-    CANONICAL_FIXED_EPOCHS / CANONICAL_HYPERPARAMS. `seed` is exempt — it is the
-    promotion-margin noise estimator, not an optimization knob.
-
-    If `promoting` (a model is being promoted to final_model/) but NO manifest
-    exists under exp_dir, we refuse: a promoted model with no verifiable training
-    record cannot be trusted to have used the locked recipe. Non-promoted /
-    audit-failed rows with no manifest are allowed through (no model to verify).
-
-    NOTE: this catches the honest agent, accidental drift, and the
-    $POSTTRAIN_FIXED_EPOCHS override path. It is defense-in-depth, not
-    cryptographic: an agent that edits BOTH train_sft.py and this file could
-    still forge a manifest — the prompt forbids that and the post-hoc judge sees
-    the tree.
+    INVARIANT: training depth (epochs) + hyperparameters are FIXED, so outcome is
+    attributable to the DATA. Refuse any train_manifest.json that deviates from
+    CANONICAL_FIXED_EPOCHS / CANONICAL_HYPERPARAMS (mirrored in train_sft.py),
+    or whose target_steps != effective_max_steps (depth capped below the locked
+    epochs — a modified trainer or oversized dataset). `seed` is exempt (noise
+    estimator). Promoting with no manifest is refused (unverifiable). Defense-in-
+    depth, not cryptographic.
     """
     manifests = sorted(exp_dir.glob("**/train_manifest.json"))
     if not manifests:
@@ -1610,6 +1595,21 @@ def _check_locked_recipe(exp_dir: Path, promoting: bool) -> None:
                 f"{CANONICAL_FIXED_EPOCHS}. Training DEPTH is not a knob — do not "
                 "set $POSTTRAIN_FIXED_EPOCHS or modify train_sft.py. "
                 "(A pre-lock manifest with no 'fixed_epochs' also fails here.)"
+            )
+        # Defense-in-depth: a stock trainer always sets these equal (effective
+        # depth == FIXED_EPOCHS). If they differ, depth was capped below the
+        # locked epochs (dataset too large for the budget, or an edited trainer
+        # that capped instead of refusing) — refuse so a sub-depth run can't
+        # publish as if it used canonical depth.
+        ts = m.get("target_steps")
+        ems = m.get("effective_max_steps")
+        if ts is not None and ems is not None and ts != ems:
+            raise SystemExit(
+                f"locked-recipe gate: {rel} target_steps={ts!r} != "
+                f"effective_max_steps={ems!r}. Depth was capped below the locked "
+                f"{CANONICAL_FIXED_EPOCHS} epochs (dataset too large for the budget, "
+                "or trainer modified to cap instead of refuse). The locked-depth "
+                "guarantee is broken; curate the dataset smaller and retrain."
             )
         hp = m.get("hyperparams") or {}
         for key, want in CANONICAL_HYPERPARAMS.items():

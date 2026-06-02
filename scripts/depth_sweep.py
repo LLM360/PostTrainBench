@@ -1,25 +1,18 @@
 #!/usr/bin/env python3
 """Offline training-DEPTH sweep — validate / retune the locked FIXED_EPOCHS.
 
-Training depth (epochs) is LOCKED in the data-engineering loop: the agent cannot
-tune it, so a run's outcome is attributable to the DATA, not a duration tune
-(see src/eval/general/train_sft.py `FIXED_EPOCHS_CANONICAL` and the publish gate
-in publish_experiment.py `CANONICAL_FIXED_EPOCHS`). This tool is the *human's*
-way to pick a GOOD locked value: it trains the SAME dataset at several epoch
-counts and full-evals each, so you can confirm the locked depth generalizes
-across dataset sizes before committing to it.
+Offline human tool: trains the SAME dataset at several epoch counts (via the
+$POSTTRAIN_FIXED_EPOCHS override the agent env never sets) and full-evals each,
+to pick a good locked depth. Never publishes. After picking a value, update BOTH
+FIXED_EPOCHS_CANONICAL (train_sft.py) and CANONICAL_FIXED_EPOCHS
+(publish_experiment.py) — they must stay in sync; the gate enforces the latter.
 
-It is intentionally OUTSIDE the agent's reach:
-  * It overrides depth via $POSTTRAIN_FIXED_EPOCHS, which the agent's container
-    env never sets.
-  * It NEVER calls publish_experiment.py. Even if it did, the publish gate
-    refuses any experiment trained at a non-canonical depth — so a sweep model
-    can never reach the shared log.
+Evaluator shape: defaults assume a gpqamain-style evaluate.py whose generation
+budget flag is `--max-tokens`. Other tasks (Arena, HealthBench) use
+`--max-new-tokens` instead — sweep those with `--eval-token-flag --max-new-tokens`.
 
-After you pick a value, update BOTH:
-  * train_sft.py     -> FIXED_EPOCHS_CANONICAL
-  * publish_experiment.py -> CANONICAL_FIXED_EPOCHS
-(they must stay in sync; the gate enforces the publish-side value).
+NOTE: train_sft.py requires a SIBLING `dataset_audit_report.json` next to
+--data-path (matching its sha256); without it, training REFUSES before it starts.
 
 Usage (offline, on a GPU node; NOT inside the agent loop):
 
@@ -54,6 +47,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--work-dir", default="/tmp/depth_sweep", help="Where per-epoch models + eval JSON go.")
     p.add_argument("--seed", type=int, default=42, help="Train seed held fixed across the sweep.")
     p.add_argument("--max-tokens", type=int, default=16000, help="Eval generation budget (match the harness: 16000).")
+    p.add_argument(
+        "--eval-token-flag",
+        default="--max-tokens",
+        help=(
+            "Evaluator flag for the generation budget. Default --max-tokens "
+            "(gpqamain-style). Use --max-new-tokens for Arena/HealthBench-style tasks."
+        ),
+    )
     p.add_argument("--gpu-memory-utilization", type=float, default=0.8)
     p.add_argument("--limit", type=int, default=-1, help="Eval sample limit (-1 = full set).")
     return p.parse_args()
@@ -111,7 +112,7 @@ def main() -> int:
             "--model-path", str(out_dir),
             "--limit", str(args.limit),
             "--json-output-file", str(eval_json),
-            "--max-tokens", str(args.max_tokens),
+            args.eval_token_flag, str(args.max_tokens),
             "--gpu-memory-utilization", str(args.gpu_memory_utilization),
         ]
         subprocess.run(eval_cmd, env=env, check=True)

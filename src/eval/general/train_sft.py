@@ -46,19 +46,16 @@ WEIGHT_DECAY = 0.0
 LOGGING_STEPS = 10
 
 # --- Locked training DEPTH ---------------------------------------------------
-# Depth is FIXED, not a knob: the agent cannot tune how long/hard it trains;
-# only the dataset varies. FIXED_EPOCHS is the canonical depth, anchored to the
-# empirical winner (~20 epochs). Validate/retune it OFFLINE via
-# scripts/depth_sweep.py, then update BOTH this constant AND the matching
-# CANONICAL_FIXED_EPOCHS in publish_experiment.py (the publish gate enforces it).
-# $POSTTRAIN_FIXED_EPOCHS overrides it for OFFLINE sweeps only: any PUBLISHED
-# experiment is hard-gated to FIXED_EPOCHS_CANONICAL, so an override can never
-# reach the shared log.
+# INVARIANT: depth is FIXED at FIXED_EPOCHS epochs, not a knob — only the
+# dataset varies. KEEP IN SYNC with CANONICAL_FIXED_EPOCHS in
+# publish_experiment.py (the publish gate enforces it); update BOTH constants.
+# $POSTTRAIN_FIXED_EPOCHS overrides for OFFLINE sweeps only (publish hard-gates
+# to FIXED_EPOCHS_CANONICAL, so an override can never reach the shared log).
 FIXED_EPOCHS_CANONICAL = 20
 FIXED_EPOCHS = int(os.environ.get("POSTTRAIN_FIXED_EPOCHS", FIXED_EPOCHS_CANONICAL))
 SEED_DEFAULT = 42
-# Non-tunable safety ceiling so one huge-dataset experiment can't consume the
-# whole wall-clock budget. Logged loudly if it binds; NOT an agent knob.
+# Non-tunable compute ceiling: if FIXED_EPOCHS over the dataset would exceed
+# this, training REFUSES (it does not cap — capping would break the lock).
 MAX_STEPS_SAFETY = 12000
 
 
@@ -311,22 +308,21 @@ def main() -> int:
     rows = load_and_validate(data_path)
     ds = Dataset.from_list(rows)
 
-    # Depth is FIXED at FIXED_EPOCHS epochs over whatever dataset the agent
-    # built — it scales with the data and is NOT a tunable knob.
-    # effective_bs = PER_DEVICE_BS * GRAD_ACCUM.
+    # Depth is FIXED at exactly FIXED_EPOCHS epochs (effective_bs = PER_DEVICE_BS
+    # * GRAD_ACCUM). A successful train is ALWAYS FIXED_EPOCHS; never silently
+    # capped — capping would reintroduce the dataset-size→depth confound.
     effective_bs = PER_DEVICE_BS * GRAD_ACCUM
     steps_per_epoch = max(1, (len(rows) + effective_bs - 1) // effective_bs)
     target_steps = FIXED_EPOCHS * steps_per_epoch
-    # Non-tunable safety ceiling: bound one experiment's compute so a huge
-    # dataset can't eat the whole wall-clock. Binds rarely; logged when it does.
-    effective_max_steps = min(target_steps, MAX_STEPS_SAFETY)
-    safety_ceiling_hit = effective_max_steps < target_steps
-    if safety_ceiling_hit:
-        print(
-            f"[train_sft] SAFETY CEILING hit: {FIXED_EPOCHS} epochs on {len(rows)} "
-            f"rows = {target_steps} steps > MAX_STEPS_SAFETY={MAX_STEPS_SAFETY}; "
-            f"capping to {effective_max_steps} (effective_bs={effective_bs})"
+    if target_steps > MAX_STEPS_SAFETY:
+        max_rows = MAX_STEPS_SAFETY * effective_bs // FIXED_EPOCHS
+        raise SystemExit(
+            f"[train_sft] dataset too large for the fixed-depth budget: {len(rows)} rows "
+            f"* {FIXED_EPOCHS} epochs = {target_steps} steps > MAX_STEPS_SAFETY={MAX_STEPS_SAFETY}. "
+            f"Training fewer epochs would break the locked-depth guarantee, so this is REFUSED. "
+            f"Curate/filter the dataset to <= ~{max_rows} rows and re-run."
         )
+    effective_max_steps = target_steps
     if FIXED_EPOCHS != FIXED_EPOCHS_CANONICAL:
         print(
             f"[train_sft] WARNING: FIXED_EPOCHS={FIXED_EPOCHS} (override) != "
@@ -420,7 +416,6 @@ def main() -> int:
         "target_steps": int(target_steps),
         "effective_max_steps": int(effective_max_steps),
         "max_steps_safety": int(MAX_STEPS_SAFETY),
-        "safety_ceiling_hit": bool(safety_ceiling_hit),
         "final_train_loss": final_loss,
         "hyperparams": {
             "lora_r": LORA_R,

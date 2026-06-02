@@ -560,7 +560,7 @@ autonomous. The loop runs until the SLURM job timer kills your process. Period.
 There is no \`--done\` button you should reach for. If you think you've plateaued,
 that's a hypothesis: try a RADICALLY different data strategy (new HF sources via
 discover_datasets.py, teacher-as-judge filtering, longer/richer distilled
-rationales, GENERATE-mode synthetic, format variants, different LoRA rank, etc.).
+rationales, GENERATE-mode synthetic, format variants, dataset composition / parent selection, etc.).
 Re-read \`experiments/KNOWLEDGE.md\` for what you've already tried (mine \`#dead-end\`
 tags). Re-read \`$SHARED_LOG_CSV\` for peer learnings and used sources. Look at
 recent successful parents and ask "what one thing haven't I varied yet?"
@@ -579,9 +579,10 @@ If you run out of ideas, here are angles to explore in order:
   - Teacher-vLLM as JUDGE to raise dataset quality before distilling
   - GENERATE-mode synthetic MCQs with reasoning when discovery is dry
   - Format experiments on the reasoning chain (templating, structure)
-  - LoRA rank: r=8 / r=16 / r=32 — affects capacity-to-overfit ratio
-  - Effective batch size: 4 vs 16 vs 64
-  - Longer training but smaller dataset, or shorter training but larger dataset
+  - Tighter teacher-judge thresholds (raise the keep bar; filter for difficulty)
+  - Different synthesis mode/prompt (rationale vs generate; richer or terser CoT)
+  - Dataset composition: blend/rebalance sources, dedupe, length-filter rows
+  - Re-pick the parent: fork from a different promoted/marginal predecessor
   - Start from a non-final-model parent (a row with outcome_improved=marginal
     that you suspect was hurt by something unrelated)
 

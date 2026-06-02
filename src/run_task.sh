@@ -163,14 +163,9 @@ if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ]; then
     SHARED_LOG_DIR_HOST="${POST_TRAIN_BENCH_RESULTS_DIR}/data_eng_shared/${EVALUATION_TASK}_${RESULT_PREFIX_SAFE}"
     mkdir -p "${SHARED_LOG_DIR_HOST}"
     SHARED_LOG_CSV_CONTAINER="/shared_log/shared_log.csv"
-    # DURABILITY (never lose expensive work): the agent's experiments/ tree —
-    # mined datasets, KNOWLEDGE.md, per-experiment trained models — is the most
-    # expensive output of a multi-hour run. Historically it lived only in the
-    # node-local /tmp job_dir and was copied to Weka by a SINGLE end-of-run step,
-    # so an unclean crash / SLURM eviction / timeout lost ALL of it. Instead we
-    # WRITE IT THROUGH to durable Weka storage live, via a bind-mount (the same
-    # pattern that already persists the shared log). Now a failure at any point
-    # loses at most the single file mid-write — never the accumulated work.
+    # DURABILITY: write the agent's experiments/ tree (datasets, KNOWLEDGE.md,
+    # trained models) straight to Weka via a live bind-mount, so an unclean
+    # crash / eviction / timeout can't lose accumulated work.
     EXPERIMENTS_DIR_HOST="${EVAL_DIR}/experiments_live"
     mkdir -p "${EXPERIMENTS_DIR_HOST}"
 fi
@@ -210,13 +205,12 @@ if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ]; then
     if [ -n "${SHARED_LOG_DIR_HOST:-}" ] && [ -d "${SHARED_LOG_DIR_HOST}" ]; then
         SOLVE_EXTRA_BINDS+=( --bind "${SHARED_LOG_DIR_HOST}:/shared_log" )
     fi
-    # DURABILITY: write the agent's experiments/ tree straight to Weka. The
-    # bind targets /home/ben/task/experiments (the dir created at job-dir setup),
-    # so apptainer applies it over the node-local --home overlay and every
-    # dataset / KNOWLEDGE.md line / trained model lands on persistent storage as
-    # it is written. Scoped to data-eng runs only; default-prompt runs unaffected.
+    # DURABILITY: write the agent's experiments/ tree straight to Weka via a
+    # bind over the node-local --home overlay. Bind it for BOTH solve and judge:
+    # the judge audits the same experiments/exp_* tree the solve produced.
     if [ -n "${EXPERIMENTS_DIR_HOST:-}" ] && [ -d "${EXPERIMENTS_DIR_HOST}" ]; then
         SOLVE_EXTRA_BINDS+=( --bind "${EXPERIMENTS_DIR_HOST}:/home/ben/task/experiments" )
+        JUDGE_EXTRA_BINDS+=( --bind "${EXPERIMENTS_DIR_HOST}:/home/ben/task/experiments" )
     fi
     if [ -n "${POSTTRAIN_ENV_DIR:-}" ] && [ -d "${POSTTRAIN_ENV_DIR}" ]; then
         SOLVE_EXTRA_BINDS+=( --bind "${POSTTRAIN_ENV_DIR}:/opt/env" )
@@ -264,6 +258,14 @@ echo "================================"
 
 with_huggingface_overlay with_record_the_time solve_task
 SOLVE_EXIT=$?
+
+# Container writes went to EXPERIMENTS_DIR_HOST (bind); the host placeholder is
+# empty. Point it at the durable tree so a relative final_model symlink and the
+# task copy below resolve on the host.
+if [ -n "${EXPERIMENTS_DIR_HOST:-}" ] && [ -d "${EXPERIMENTS_DIR_HOST}" ] && [ ! -L "${JOB_DIR}/task/experiments" ]; then
+    rm -rf "${JOB_DIR}/task/experiments"
+    ln -sfn "${EXPERIMENTS_DIR_HOST}" "${JOB_DIR}/task/experiments"
+fi
 
 echo "--- SOLVE DIAGNOSTICS ---"
 echo "exit_code: $SOLVE_EXIT"
@@ -383,12 +385,9 @@ fi
 # the notes, audit reports, manifests, and the experiment index survive even
 # if downstream cleanup misbehaves. Only applies to data-eng runs (the
 # experiments/ tree does not exist on default-prompt runs).
-# Curate the small, browsable experiment_notes/ view. Read from the durable
-# write-through dir (EXPERIMENTS_DIR_HOST on Weka) when set — the bind leaves the
-# node-local ${JOB_DIR}/task/experiments empty — falling back to the legacy
-# node-local path for non-bound/older runs. NOTE: even if this curation step is
-# skipped on an unclean crash, the FULL experiments tree already persists in
-# EXPERIMENTS_DIR_HOST (experiments_live/); nothing expensive is lost.
+# Curate the browsable experiment_notes/ view. Read from the durable bind dir
+# (EXPERIMENTS_DIR_HOST) when set — the bind leaves the node-local path empty —
+# falling back to the legacy node-local path for non-bound/older runs.
 SRC_EXP="${EXPERIMENTS_DIR_HOST:-${JOB_DIR}/task/experiments}"
 if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ] && [ -d "${SRC_EXP}" ]; then
     mkdir -p "$EVAL_DIR/experiment_notes"
@@ -427,6 +426,17 @@ if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ] && [ -d "${SRC_EXP}" ]; th
 fi
 
 python containers/delete_hf_models.py "${JOB_DIR}/task"
+
+# Before the bulk task/ copy, drop symlinks that would dangle in $EVAL_DIR:
+# the experiments symlink (full tree already in experiments_live/ + notes) and,
+# if final_model was a symlink into experiments/ (already promoted via cp -aH
+# above), the now-orphaned final_model link. A real final_model dir is kept.
+if [ -L "${JOB_DIR}/task/final_model" ]; then
+    rm -f "${JOB_DIR}/task/final_model"
+fi
+if [ -L "${JOB_DIR}/task/experiments" ]; then
+    rm -f "${JOB_DIR}/task/experiments"
+fi
 
 cp -r "${JOB_DIR}/task" "$EVAL_DIR/task"
 

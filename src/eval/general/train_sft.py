@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Locked SFT+LoRA training recipe for the data-engineering agent loop.
 
-The agent's *only* variable is --data-path (and --output-dir / --max-steps /
---seed as small whitelisted knobs). All hyperparameters are fixed below.
+The agent's *only* variable is the DATASET (--data-path / --output-dir). Training
+DEPTH is locked to a fixed number of epochs — there is NO --max-steps knob — so a
+run's outcome is attributable to the data, not to a training-duration tune. --seed
+remains ONLY so the agent can estimate across-seed noise for the promotion margin
+(a measurement input, not an optimization lever). publish_experiment.py hard-gates
+any experiment whose recorded recipe deviates from the locked values below.
 Schema check is strict: each JSONL row must be
     {"messages": [{"role": "user", "content": str},
                   {"role": "assistant", "content": str}, ...]}
@@ -41,21 +45,35 @@ WARMUP_RATIO = 0.03
 WEIGHT_DECAY = 0.0
 LOGGING_STEPS = 10
 
-MAX_STEPS_DEFAULT = 2000
+# --- Locked training DEPTH ---------------------------------------------------
+# INVARIANT: depth is FIXED at FIXED_EPOCHS epochs, not a knob — only the
+# dataset varies. KEEP IN SYNC with CANONICAL_FIXED_EPOCHS in
+# publish_experiment.py (the publish gate enforces it); update BOTH constants.
+# $POSTTRAIN_FIXED_EPOCHS overrides for OFFLINE sweeps only (publish hard-gates
+# to FIXED_EPOCHS_CANONICAL, so an override can never reach the shared log).
+FIXED_EPOCHS_CANONICAL = 20
+FIXED_EPOCHS = int(os.environ.get("POSTTRAIN_FIXED_EPOCHS", FIXED_EPOCHS_CANONICAL))
 SEED_DEFAULT = 42
-MAX_EPOCHS_CAP = 30  # hard cap on epochs regardless of --max-steps; raised from 5 because the empirical winner used ~20 epochs via continuation training
+# Non-tunable compute ceiling: if FIXED_EPOCHS over the dataset would exceed
+# this, training REFUSES (it does not cap — capping would break the lock).
+MAX_STEPS_SAFETY = 12000
 
 
 def parse_args() -> argparse.Namespace:
-    # Whitelist: --data-path, --output-dir, --max-steps, --seed only.
-    # --base-model is intentionally NOT a flag: the locked recipe always
-    # trains $MODEL_TO_TRAIN. Argparse rejects any unknown arg.
+    # Whitelist: --data-path, --output-dir, --seed only. There is deliberately
+    # NO --max-steps / depth knob — training depth is locked (FIXED_EPOCHS), so
+    # outcomes are attributable to the DATA, not a duration tune. --base-model is
+    # also not a flag (the locked recipe always trains $MODEL_TO_TRAIN). Argparse
+    # rejects any unknown arg, so `--max-steps ...` now hard-errors.
     p = argparse.ArgumentParser(
-        description="Locked SFT+LoRA trainer.", allow_abbrev=False
+        description="Locked SFT+LoRA trainer (the dataset is the only variable).",
+        allow_abbrev=False,
     )
     p.add_argument("--data-path", required=True, help="JSONL with 'messages' rows.")
     p.add_argument("--output-dir", default="final_model")
-    p.add_argument("--max-steps", type=int, default=MAX_STEPS_DEFAULT)
+    # --seed is a MEASUREMENT input only: train >=2 seeds to estimate the
+    # across-seed noise the promotion margin consumes. You may NOT cherry-pick
+    # the best seed (promotion uses the mean + std-based margin).
     p.add_argument("--seed", type=int, default=SEED_DEFAULT)
     return p.parse_args()
 
@@ -290,19 +308,32 @@ def main() -> int:
     rows = load_and_validate(data_path)
     ds = Dataset.from_list(rows)
 
-    # Auto-cap max_steps to MAX_EPOCHS_CAP epochs so small datasets don't
-    # over-train. effective_bs = PER_DEVICE_BS * GRAD_ACCUM.
+    # Depth is FIXED at exactly FIXED_EPOCHS epochs (effective_bs = PER_DEVICE_BS
+    # * GRAD_ACCUM). A successful train is ALWAYS FIXED_EPOCHS; never silently
+    # capped — capping would reintroduce the dataset-size→depth confound.
     effective_bs = PER_DEVICE_BS * GRAD_ACCUM
     steps_per_epoch = max(1, (len(rows) + effective_bs - 1) // effective_bs)
-    epoch_cap_steps = MAX_EPOCHS_CAP * steps_per_epoch
-    effective_max_steps = min(args.max_steps, epoch_cap_steps)
-    if effective_max_steps != args.max_steps:
+    target_steps = FIXED_EPOCHS * steps_per_epoch
+    if target_steps > MAX_STEPS_SAFETY:
+        max_rows = MAX_STEPS_SAFETY * effective_bs // FIXED_EPOCHS
+        raise SystemExit(
+            f"[train_sft] dataset too large for the fixed-depth budget: {len(rows)} rows "
+            f"* {FIXED_EPOCHS} epochs = {target_steps} steps > MAX_STEPS_SAFETY={MAX_STEPS_SAFETY}. "
+            f"Training fewer epochs would break the locked-depth guarantee, so this is REFUSED. "
+            f"Curate/filter the dataset to <= ~{max_rows} rows and re-run."
+        )
+    effective_max_steps = target_steps
+    if FIXED_EPOCHS != FIXED_EPOCHS_CANONICAL:
         print(
-            f"[train_sft] capping --max-steps {args.max_steps} → {effective_max_steps} "
-            f"({MAX_EPOCHS_CAP} epochs on {len(rows)} rows, effective_bs={effective_bs})"
+            f"[train_sft] WARNING: FIXED_EPOCHS={FIXED_EPOCHS} (override) != "
+            f"canonical {FIXED_EPOCHS_CANONICAL}; publish_experiment.py will REFUSE "
+            f"this experiment. Use only for offline depth sweeps."
         )
 
-    print(f"[train_sft] base={base_model} rows={len(rows)} steps={effective_max_steps}")
+    print(
+        f"[train_sft] base={base_model} rows={len(rows)} "
+        f"epochs={FIXED_EPOCHS} steps={effective_max_steps}"
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(base_model)
     if tokenizer.pad_token is None:
@@ -380,8 +411,11 @@ def main() -> int:
         "data_sha256": file_sha256(data_path),
         "row_count": len(rows),
         "actual_steps": actual_steps,
-        "max_steps_arg": int(args.max_steps),
+        "fixed_epochs": int(FIXED_EPOCHS),
+        "fixed_epochs_canonical": int(FIXED_EPOCHS_CANONICAL),
+        "target_steps": int(target_steps),
         "effective_max_steps": int(effective_max_steps),
+        "max_steps_safety": int(MAX_STEPS_SAFETY),
         "final_train_loss": final_loss,
         "hyperparams": {
             "lora_r": LORA_R,

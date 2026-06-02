@@ -566,9 +566,12 @@ tags). Re-read \`$SHARED_LOG_CSV\` for peer learnings and used sources. Look at
 recent successful parents and ask "what one thing haven't I varied yet?"
 
 Stopping criterion: when \`bash timer.sh\` says TIME_UP. Until then, you are
-generating new experiments. If you finish an experiment and have 10 minutes left,
-you start exp_<N+1> with a 1-step training run rather than stopping. There is no
-"wait for the run to finish naturally." The system kills you.
+generating new experiments. Training depth is locked, so the only lever is DATA:
+if you finish an experiment and have 10 minutes left, you start exp_<N+1>'s DATA
+work rather than stopping — write its \`notes.md\` hypothesis, run
+\`dataset_audit.py\` on a small curated dataset, or mine+judge a new source — so
+the next dataset is ready to train. There is no "wait and stop." The system kills
+you.
 
 The codex session may be respawned by solve.sh. Each respawn is a CONTINUATION,
 not a fresh start — resume from your highest exp_NNN dir.

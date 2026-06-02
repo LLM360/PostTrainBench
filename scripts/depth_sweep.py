@@ -9,7 +9,8 @@ FIXED_EPOCHS_CANONICAL (train_sft.py) and CANONICAL_FIXED_EPOCHS
 
 Evaluator shape: defaults assume a gpqamain-style evaluate.py whose generation
 budget flag is `--max-tokens`. Other tasks (Arena, HealthBench) use
-`--max-new-tokens` instead — sweep those with `--eval-token-flag --max-new-tokens`.
+`--max-new-tokens` instead — sweep those with `--eval-token-flag=--max-new-tokens`
+(use the `=` form so argparse doesn't read the dashed value as another option).
 
 NOTE: train_sft.py requires a SIBLING `dataset_audit_report.json` next to
 --data-path (matching its sha256); without it, training REFUSES before it starts.
@@ -52,7 +53,9 @@ def parse_args() -> argparse.Namespace:
         default="--max-tokens",
         help=(
             "Evaluator flag for the generation budget. Default --max-tokens "
-            "(gpqamain-style). Use --max-new-tokens for Arena/HealthBench-style tasks."
+            "(gpqamain-style). For Arena/HealthBench-style tasks pass it with the "
+            "equals form so the dashed value isn't parsed as another option: "
+            "--eval-token-flag=--max-new-tokens."
         ),
     )
     p.add_argument("--gpu-memory-utilization", type=float, default=0.8)

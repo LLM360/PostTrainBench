@@ -1567,8 +1567,9 @@ def _check_locked_recipe(exp_dir: Path, promoting: bool) -> None:
     INVARIANT: training depth (epochs) + hyperparameters are FIXED, so outcome is
     attributable to the DATA. Refuse any train_manifest.json that deviates from
     CANONICAL_FIXED_EPOCHS / CANONICAL_HYPERPARAMS (mirrored in train_sft.py),
-    or whose target_steps != effective_max_steps (depth capped below the locked
-    epochs — a modified trainer or oversized dataset). `seed` is exempt (noise
+    or that is missing target_steps/effective_max_steps or has them unequal
+    (depth capped below the locked epochs, or an unprovable forged/stale
+    manifest — a modified trainer or oversized dataset). `seed` is exempt (noise
     estimator). Promoting with no manifest is refused (unverifiable). Defense-in-
     depth, not cryptographic.
     """
@@ -1596,20 +1597,26 @@ def _check_locked_recipe(exp_dir: Path, promoting: bool) -> None:
                 "set $POSTTRAIN_FIXED_EPOCHS or modify train_sft.py. "
                 "(A pre-lock manifest with no 'fixed_epochs' also fails here.)"
             )
-        # Defense-in-depth: a stock trainer always sets these equal (effective
-        # depth == FIXED_EPOCHS). If they differ, depth was capped below the
-        # locked epochs (dataset too large for the budget, or an edited trainer
-        # that capped instead of refusing) — refuse so a sub-depth run can't
-        # publish as if it used canonical depth.
+        # Defense-in-depth: these are part of the locked-depth proof. A stock
+        # trainer always emits BOTH and sets them equal (effective depth ==
+        # FIXED_EPOCHS). Require both present AND equal: a missing field can't
+        # prove canonical depth (a forged/stale manifest could drop it), and if
+        # they differ, depth was capped below the locked epochs (dataset too
+        # large for the budget, or an edited trainer that capped instead of
+        # refusing). Refuse either way so a sub-depth/unproven run can't publish
+        # as if it used canonical depth. Post-lock manifests always have both.
         ts = m.get("target_steps")
         ems = m.get("effective_max_steps")
-        if ts is not None and ems is not None and ts != ems:
+        if ts is None or ems is None or ts != ems:
             raise SystemExit(
-                f"locked-recipe gate: {rel} target_steps={ts!r} != "
-                f"effective_max_steps={ems!r}. Depth was capped below the locked "
-                f"{CANONICAL_FIXED_EPOCHS} epochs (dataset too large for the budget, "
-                "or trainer modified to cap instead of refuse). The locked-depth "
-                "guarantee is broken; curate the dataset smaller and retrain."
+                f"locked-recipe gate: {rel} target_steps={ts!r} / "
+                f"effective_max_steps={ems!r} — missing depth field(s) or capped "
+                f"below the locked {CANONICAL_FIXED_EPOCHS} epochs. Both must be "
+                "present and equal to prove canonical depth (dataset too large for "
+                "the budget, trainer modified to cap instead of refuse, or a "
+                "forged/stale manifest). The locked-depth guarantee is broken; "
+                "curate the dataset smaller and retrain with the unmodified "
+                "train_sft.py."
             )
         hp = m.get("hyperparams") or {}
         for key, want in CANONICAL_HYPERPARAMS.items():

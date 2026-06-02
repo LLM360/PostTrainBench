@@ -450,8 +450,12 @@ unless audit_pass AND decontam_pass AND outcome_improved == "yes".
 
 **PROMOTION NEEDS A MARGIN OVER A 2ND SEED.** To promote a new best, hand the
 publisher BOTH seeds' eval files via \`--eval-results\` (comma/space list of
-\`eval_result*.json\`) or pass each accuracy with a repeatable \`--eval-after ACC\`
-(one per seed); it also auto-globs \`eval_result*.json\` in \`--exp-dir\`. The
+\`eval_result*.json\`); it also auto-globs \`eval_result*.json\` in \`--exp-dir\`.
+ONLY these validated, file-backed evals feed the promotion math. \`--eval-after
+ACC\` is DISPLAY-ONLY — it populates the readable eval_after column but is NOT
+counted toward \`eval_after_mean\` or the margin (a raw float can't be re-validated
+against the full-sample / max-token / accuracy checks), so do not rely on it to
+promote. The
 publisher records \`eval_after_mean\`, \`eval_after_std\`, \`n_eval_seeds\` (schema v5)
 and applies the rule: \`outcome_improved=yes\` / promoted ONLY if
 \`eval_after_mean > eval_before + max(PROMOTION_MARGIN_FLOOR, PROMOTION_STD_K *

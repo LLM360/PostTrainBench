@@ -259,14 +259,6 @@ echo "================================"
 with_huggingface_overlay with_record_the_time solve_task
 SOLVE_EXIT=$?
 
-# Container writes went to EXPERIMENTS_DIR_HOST (bind); the host placeholder is
-# empty. Point it at the durable tree so a relative final_model symlink and the
-# task copy below resolve on the host.
-if [ -n "${EXPERIMENTS_DIR_HOST:-}" ] && [ -d "${EXPERIMENTS_DIR_HOST}" ] && [ ! -L "${JOB_DIR}/task/experiments" ]; then
-    rm -rf "${JOB_DIR}/task/experiments"
-    ln -sfn "${EXPERIMENTS_DIR_HOST}" "${JOB_DIR}/task/experiments"
-fi
-
 echo "--- SOLVE DIAGNOSTICS ---"
 echo "exit_code: $SOLVE_EXIT"
 if [ $SOLVE_EXIT -eq 0 ]; then
@@ -351,6 +343,16 @@ python agents/codex/human_readable_trace.py "${EVAL_DIR}/judge_output.json" -o "
 
 cp "${JOB_DIR}/task/contamination_judgement.txt" "${EVAL_DIR}/contamination_judgement.txt"
 cp "${JOB_DIR}/task/disallowed_model_judgement.txt" "${EVAL_DIR}/disallowed_model_judgement.txt"
+
+# Container writes went to EXPERIMENTS_DIR_HOST (bind); the host placeholder is
+# empty. Point it at the durable tree so a relative final_model symlink and the
+# task copy below resolve on the host. Ordering matters: this runs AFTER the
+# judge (whose JUDGE_EXTRA_BINDS needs a real dir destination, not a symlink, to
+# mount cleanly) and BEFORE final_model handling / the bulk task copy.
+if [ -n "${EXPERIMENTS_DIR_HOST:-}" ] && [ -d "${EXPERIMENTS_DIR_HOST}" ] && [ ! -L "${JOB_DIR}/task/experiments" ]; then
+    rm -rf "${JOB_DIR}/task/experiments"
+    ln -sfn "${EXPERIMENTS_DIR_HOST}" "${JOB_DIR}/task/experiments"
+fi
 
 echo "============================="
 echo "======== CLEANING UP ========"

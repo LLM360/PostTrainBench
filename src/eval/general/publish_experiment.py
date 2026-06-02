@@ -136,6 +136,31 @@ def _env_float(name: str, default: float) -> float:
 PROMOTION_MARGIN_FLOOR = _env_float("PROMOTION_MARGIN_FLOOR", 0.015)
 PROMOTION_STD_K = _env_float("PROMOTION_STD_K", 1.0)
 
+# --- LOCKED-RECIPE GATE (data-is-the-only-variable enforcement) -------------
+# Mirror of the locked constants in train_sft.py. Training DEPTH (epochs) and
+# every hyperparameter below are FIXED so a published experiment's outcome is
+# attributable to the DATA, not a training-duration or hyperparameter tune.
+# train_sft.py records these in each final_model*/train_manifest.json; the gate
+# (_check_locked_recipe) REFUSES to publish any experiment whose manifest
+# deviates — catching an agent that edited its train_sft.py copy, set
+# $POSTTRAIN_FIXED_EPOCHS, or otherwise tuned depth/hyperparameters.
+# KEEP IN SYNC with train_sft.py. `seed` is intentionally NOT pinned: it is the
+# across-seed noise estimator for the promotion margin, not an optimization knob.
+CANONICAL_FIXED_EPOCHS = 20
+CANONICAL_HYPERPARAMS = {
+    "lora_r": 16,
+    "lora_alpha": 32,
+    "lora_dropout": 0.05,
+    "lora_target_modules": "all-linear",
+    "lr": 2e-4,
+    "lr_scheduler": "cosine",
+    "per_device_bs": 2,
+    "grad_accum": 8,
+    "max_seq_len": 8192,
+    "warmup_ratio": 0.03,
+    "weight_decay": 0.0,
+}
+
 SHARED_FIELDS = [
     "agent_id",
     "cluster_id",
@@ -1541,6 +1566,65 @@ def _persist_promoted_data(
         return None
 
 
+def _check_locked_recipe(exp_dir: Path, promoting: bool) -> None:
+    """HARD GATE: every trained model under exp_dir must use the locked recipe.
+
+    Training DEPTH (epochs) and all hyperparameters are FIXED so a published
+    experiment's outcome is attributable to the DATA, not a training-duration or
+    hyperparameter tune. We read every train_manifest.json train_sft.py wrote
+    (final_model/, final_model_seed2/, ...) and refuse on ANY deviation from
+    CANONICAL_FIXED_EPOCHS / CANONICAL_HYPERPARAMS. `seed` is exempt — it is the
+    promotion-margin noise estimator, not an optimization knob.
+
+    If `promoting` (a model is being promoted to final_model/) but NO manifest
+    exists under exp_dir, we refuse: a promoted model with no verifiable training
+    record cannot be trusted to have used the locked recipe. Non-promoted /
+    audit-failed rows with no manifest are allowed through (no model to verify).
+
+    NOTE: this catches the honest agent, accidental drift, and the
+    $POSTTRAIN_FIXED_EPOCHS override path. It is defense-in-depth, not
+    cryptographic: an agent that edits BOTH train_sft.py and this file could
+    still forge a manifest — the prompt forbids that and the post-hoc judge sees
+    the tree.
+    """
+    manifests = sorted(exp_dir.glob("**/train_manifest.json"))
+    if not manifests:
+        if promoting:
+            raise SystemExit(
+                f"locked-recipe gate: {exp_dir.name} is being promoted but has no "
+                "train_manifest.json under it — cannot verify the locked training "
+                "recipe was used. Train with the unmodified train_sft.py."
+            )
+        return
+    tol = 1e-9
+    for mpath in manifests:
+        try:
+            m = json.loads(mpath.read_text())
+        except Exception as exc:  # noqa: BLE001 - want a clear refusal message
+            raise SystemExit(f"locked-recipe gate: cannot read {mpath}: {exc}")
+        rel = f"{mpath.parent.name}/train_manifest.json"
+        fe = m.get("fixed_epochs")
+        if fe != CANONICAL_FIXED_EPOCHS:
+            raise SystemExit(
+                f"locked-recipe gate: {rel} fixed_epochs={fe!r} != locked "
+                f"{CANONICAL_FIXED_EPOCHS}. Training DEPTH is not a knob — do not "
+                "set $POSTTRAIN_FIXED_EPOCHS or modify train_sft.py. "
+                "(A pre-lock manifest with no 'fixed_epochs' also fails here.)"
+            )
+        hp = m.get("hyperparams") or {}
+        for key, want in CANONICAL_HYPERPARAMS.items():
+            got = hp.get(key)
+            if isinstance(want, float) and isinstance(got, (int, float)):
+                ok = abs(float(got) - want) <= tol
+            else:
+                ok = got == want
+            if not ok:
+                raise SystemExit(
+                    f"locked-recipe gate: {rel} hyperparam {key}={got!r} != locked "
+                    f"{want!r}. Only the DATASET may vary; the recipe is fixed."
+                )
+
+
 def main() -> int:
     args = parse_args()
     exp_dir = Path(args.exp_dir).resolve()
@@ -1562,6 +1646,11 @@ def main() -> int:
     notes = notes_path.read_text()
     sections = parse_notes_sections(notes)
     _validate_required_sections(sections, audit_failed=args.audit_failed)
+
+    # LOCKED-RECIPE GATE: training depth (epochs) + hyperparameters are fixed;
+    # the dataset is the only variable. Refuse any experiment whose
+    # train_manifest.json deviates. (seed is exempt — noise estimator only.)
+    _check_locked_recipe(exp_dir, promoting=bool(args.promoted))
 
     shared_path = os.environ.get("SHARED_LOG_CSV")
     local_idx = exp_dir.parent / "index.csv"

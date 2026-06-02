@@ -179,7 +179,7 @@ then a single \`ANSWER: X\` line.
 - \`python3 teacher_judge.py [...]\` — LLM-as-judge relevance/quality filter (see DATA STRATEGY).
 - \`python3 teacher_synth.py [...]\` — teacher reasoning distillation / synthesis (see DATA STRATEGY).
 - \`python dataset_audit.py --data-path <jsonl> [--parent-path <jsonl>] [--strict-behavior] [--allow-think-migration]\` — **mandatory** hard gate. Fails on test-set contamination or low diversity. It ALSO hard-fails (exit 1, independent of \`--strict-behavior\`) on any THINKING-ONLY shape violation: a row with NO \`<think>\` block, an unclosed/missing \`</think>\`, MULTIPLE \`<think>\` blocks, an \`ANSWER:\` marker before/inside \`<think>\`, more than one \`ANSWER:\` marker, or no \`ANSWER:\` line after \`</think>\`. With \`--parent-path\` it adds a behavioral guard (\`ANSWER:\` marker rate, answer-letter distribution, fraction of traces rewritten vs parent); \`--strict-behavior\` makes \`behavior.high_risk\` a hard gate (exit 1). \`--allow-think-migration\` waives ONLY the mass-rewrite hard-fail when every changed row is a pure \`<think>\` wrapper of the parent (one-time bare-CoT migration). OMIT \`--parent-path\` for \`Parent=none\` (exp_001) or cross-agent parents whose files you cannot read. See step 5.
-- \`python train_sft.py --data-path <jsonl> --output-dir experiments/exp_<N>/final_model\` — locked recipe. Whitelisted args only: \`--data-path\`, \`--output-dir\`, \`--max-steps\`, \`--seed\`. (\`$MODEL_TO_TRAIN\` is fixed; no \`--base-model\` flag.)
+- \`python train_sft.py --data-path <jsonl> --output-dir experiments/exp_<N>/final_model\` — locked recipe. Whitelisted args only: \`--data-path\`, \`--output-dir\`, \`--seed\`. There is NO depth/steps knob — training depth is FIXED at a locked number of epochs, so outcomes are attributable to your DATA, not a training-duration tune. (\`$MODEL_TO_TRAIN\` is fixed; no \`--base-model\` flag.)
 - \`python publish_experiment.py --exp-dir experiments/exp_<N>/ [--data-sources "..."] [--promoted | --audit-failed] [--done]\` — appends one row to \`$SHARED_LOG_CSV\` and to \`experiments/index.csv\`. \`--done\` is an emergency backstop the publisher refuses 99% of the time — do NOT reach for it. The framework, not you, decides when the run ends (see "Operating discipline").
 - \`python evaluate.py --model-path <path> --limit -1 --json-output-file <path> --max-tokens 16000 --max-connections 8 --gpu-memory-utilization 0.8\` — full self-eval. You are EXPECTED to run this on every experiment (see step 7). NOTE: \`--max-tokens 16000\` is mandatory; see step 7.
 
@@ -344,8 +344,10 @@ to think forever and never answer). Keep each FULL target (user prompt + \`<thin
 block + \`ANSWER:\` line) comfortably within 8192 — teacher_synth's
 \`enforce_seq_budget\` tail-trims the \`<think>\` body to protect the ANSWER line, but
 don't rely on it; favour tighter CoT. \`MAX_SEQ_LEN\` is set INSIDE the locked
-\`train_sft.py\` — it is NOT a flag. You still pass only \`--data-path\` /
-\`--output-dir\` / \`--max-steps\` / \`--seed\`.
+\`train_sft.py\` — it is NOT a flag. You pass only \`--data-path\` /
+\`--output-dir\` / \`--seed\`. Training DEPTH (epochs/steps) is ALSO locked inside
+the recipe — there is no \`--max-steps\`; you cannot tune how long it trains. Only
+the dataset varies.
 If you intend to PROMOTE this as a NEW BEST (step 10), you must confirm it across
 TWO seeds — train a second model on the SAME data with a different \`--seed\`:
 \`\`\`bash
@@ -547,7 +549,7 @@ and gives peers no readable signal.
 15. **Parent must follow the backtrack rule.** The expected parent is the most-recent local row with \`outcome_improved == "yes"\` (or \`none\` if none exists yet). If you want to fork from a non-most-recent-improved parent (e.g., to escape a local optimum after multiple failures off the same parent), you MUST include the marker \`[override:<short_reason>]\` in your \`## Method\` section. The publisher refuses an off-parent fork without that marker.
 16. **Promoted means VERIFIED improvement — confirmed across a 2nd seed by a margin.** \`--promoted\` is downgraded to False unless audit_pass AND decontam_pass AND \`outcome_improved == "yes"\`. And \`outcome_improved == "yes"\` itself now requires \`eval_after_mean > eval_before + max(PROMOTION_MARGIN_FLOOR=0.015, PROMOTION_STD_K=1.0 * eval_after_std)\`: train a SECOND seed (\`train_sft.py --seed <different>\`), eval both, and pass both eval files via \`--eval-results\` / \`--eval-after\` (see steps 6, 7, 10). A single-seed ~1pt delta will NOT clear the margin — do not build a long subtree on one. Use \`--promoted\` to mark the new candidate parent.
 17. **Inspect teacher-synthetic content before training on it.** If your dataset uses the teacher vLLM endpoint to generate novel questions OR distill rationales, sample 5-10 rows BEFORE running \`dataset_audit.py\` and read them: are the answers actually correct? Does each rationale actually reach the claimed \`ANSWER:\` letter? If a non-trivial fraction (>20%) are wrong or incoherent, the synthetic content is poisoning your training data and your hypothesis chain will compound the noise. Either fix the teacher prompt or fall back to mined-rationale sources.
-18. You may not invent additional flags for \`train_sft.py\`. Only \`--data-path\`, \`--output-dir\`, \`--max-steps\`, \`--seed\` are accepted.
+18. You may not invent additional flags for \`train_sft.py\`. Only \`--data-path\`, \`--output-dir\`, \`--seed\` are accepted. There is NO \`--max-steps\`/depth knob — training depth is LOCKED to a fixed number of epochs. \`--seed\` exists ONLY to estimate across-seed noise for the promotion margin (a measurement input): you may NOT cherry-pick the best seed — promotion uses the multi-seed MEAN. \`publish_experiment.py\` hard-refuses any experiment whose \`train_manifest.json\` shows a non-locked depth or hyperparameter, so editing \`train_sft.py\` or setting \`$POSTTRAIN_FIXED_EPOCHS\` will only get your experiment rejected at publish.
 
 ## Operating discipline (applies throughout)
 

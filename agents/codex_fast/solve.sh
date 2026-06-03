@@ -69,7 +69,15 @@ while true; do
     ATTEMPT=$((ATTEMPT + 1))
     echo "[solve.sh] launching codex attempt #$ATTEMPT at $(date -u +%FT%TZ)"
 
-    if [ "$ATTEMPT" -eq 1 ]; then
+    # On attempt #1, normally use the bare base prompt. BUT if the durable
+    # experiments/ tree already contains prior exp_NNN dirs, this is a RESUMED
+    # allocation (e.g. SLURM preempt+requeue started a fresh job on the same
+    # durable EVAL_DIR) — treat attempt #1 as a continuation so codex resumes
+    # from the highest exp_NNN instead of restarting at exp_001. Empty
+    # experiments/ (true exp_001) and default-prompt runs (no experiments/ dir,
+    # so the glob never matches) keep the bare prompt.
+    EXP_DIR=/home/ben/task/experiments
+    if [ "$ATTEMPT" -eq 1 ] && ! ls -d "$EXP_DIR"/exp_* >/dev/null 2>&1; then
         EFFECTIVE_PROMPT="$PROMPT"
     else
         EFFECTIVE_PROMPT="$PROMPT

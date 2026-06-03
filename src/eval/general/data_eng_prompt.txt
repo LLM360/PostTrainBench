@@ -525,7 +525,8 @@ HARD GATES (system-enforced — you will see SystemExit messages if you violate 
   malformed row mis-scores even though the trailing line looks right — scrub it
   upstream. See the THINKING-ONLY FORMAT note at the top and step 5.
 
-- The codex session may be respawned by solve.sh if you exit early. Treat each
+- The codex session may be respawned by solve.sh if you exit early, OR
+  restarted in a fresh SLURM allocation after preemption/requeue. Treat each
   respawn as a CONTINUATION, not a fresh start. Read KNOWLEDGE.md, find your
   last in-progress experiment (highest exp_NNN dir), and resume from where you
   were. If your last experiment was unpublished and has all required files,

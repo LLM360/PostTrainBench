@@ -168,6 +168,20 @@ if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ]; then
     # crash / eviction / timeout can't lose accumulated work.
     EXPERIMENTS_DIR_HOST="${EVAL_DIR}/experiments_live"
     mkdir -p "${EXPERIMENTS_DIR_HOST}"
+    # READ-SHARED / WRITE-OWN KNOWLEDGE: each agent writes ONLY its own file in a
+    # shared dir all agents can read, so peers learn from each other live without a
+    # single-file write collision (both agents reuse exp_NNN numbering, which would
+    # trip the publish KNOWLEDGE validator). The shared dir lives under the already
+    # bind-mounted shared-log dir (-> /shared_log/knowledge in the container).
+    SHARED_KNOWLEDGE_DIR_HOST="${SHARED_LOG_DIR_HOST}/knowledge"
+    mkdir -p "${SHARED_KNOWLEDGE_DIR_HOST}"
+    AGENT_KNOWLEDGE_HOST="${SHARED_KNOWLEDGE_DIR_HOST}/${AGENT}-${CLUSTER_ID}.md"
+    touch "${AGENT_KNOWLEDGE_HOST}"
+    # The agent's experiments/KNOWLEDGE.md IS its own shared file. Symlink target is
+    # the CONTAINER path (/shared_log/knowledge/...), valid inside the container
+    # because SHARED_LOG_DIR_HOST is bound to /shared_log. (Dangling on the host —
+    # the post-run copy reads AGENT_KNOWLEDGE_HOST directly, see below.)
+    ln -sfn "/shared_log/knowledge/${AGENT}-${CLUSTER_ID}.md" "${EXPERIMENTS_DIR_HOST}/KNOWLEDGE.md"
 fi
 
 # Build the data-engineering-only extra args. These are appended to both the
@@ -204,6 +218,9 @@ if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ]; then
     )
     if [ -n "${SHARED_LOG_DIR_HOST:-}" ] && [ -d "${SHARED_LOG_DIR_HOST}" ]; then
         SOLVE_EXTRA_BINDS+=( --bind "${SHARED_LOG_DIR_HOST}:/shared_log" )
+        # The judge resolves experiments/KNOWLEDGE.md (-> /shared_log/knowledge/...)
+        # and reads the shared notes tree, so it needs the same bind.
+        JUDGE_EXTRA_BINDS+=( --bind "${SHARED_LOG_DIR_HOST}:/shared_log" )
     fi
     # DURABILITY: write the agent's experiments/ tree straight to Weka via a
     # bind over the node-local --home overlay. Bind it for BOTH solve and judge:
@@ -398,8 +415,21 @@ if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ] && [ -d "${SRC_EXP}" ]; th
     fi
     # V2: the accumulating KNOWLEDGE.md is the single most valuable
     # artifact for cross-experiment learning. Save it alongside index.csv.
-    if [ -f "${SRC_EXP}/KNOWLEDGE.md" ]; then
+    # READ-SHARED / WRITE-OWN: SRC_EXP/KNOWLEDGE.md is a symlink into the shared
+    # knowledge dir (dangling on the host), so prefer the REAL own file
+    # AGENT_KNOWLEDGE_HOST; fall back to SRC_EXP/KNOWLEDGE.md for legacy runs.
+    if [ -n "${AGENT_KNOWLEDGE_HOST:-}" ] && [ -f "${AGENT_KNOWLEDGE_HOST}" ]; then
+        cp "${AGENT_KNOWLEDGE_HOST}" "$EVAL_DIR/experiment_notes/KNOWLEDGE.md"
+    elif [ -f "${SRC_EXP}/KNOWLEDGE.md" ]; then
         cp "${SRC_EXP}/KNOWLEDGE.md" "$EVAL_DIR/experiment_notes/KNOWLEDGE.md"
+    fi
+    # Preserve the combined cross-agent record (every peer's own file) so
+    # post-hoc analysis can see what each agent learned and shared.
+    if [ -n "${SHARED_KNOWLEDGE_DIR_HOST:-}" ] && [ -d "${SHARED_KNOWLEDGE_DIR_HOST}" ]; then
+        mkdir -p "$EVAL_DIR/experiment_notes/peer_knowledge"
+        for kf in "${SHARED_KNOWLEDGE_DIR_HOST}"/*.md; do
+            [ -f "$kf" ] && cp "$kf" "$EVAL_DIR/experiment_notes/peer_knowledge/"
+        done
     fi
     for exp_dir in "${SRC_EXP}"/exp_*; do
         [ -d "$exp_dir" ] || continue

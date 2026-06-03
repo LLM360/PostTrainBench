@@ -218,6 +218,9 @@ if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ]; then
     )
     if [ -n "${SHARED_LOG_DIR_HOST:-}" ] && [ -d "${SHARED_LOG_DIR_HOST}" ]; then
         SOLVE_EXTRA_BINDS+=( --bind "${SHARED_LOG_DIR_HOST}:/shared_log" )
+        # The judge resolves experiments/KNOWLEDGE.md (-> /shared_log/knowledge/...)
+        # and reads the shared notes tree, so it needs the same bind.
+        JUDGE_EXTRA_BINDS+=( --bind "${SHARED_LOG_DIR_HOST}:/shared_log" )
     fi
     # DURABILITY: write the agent's experiments/ tree straight to Weka via a
     # bind over the node-local --home overlay. Bind it for BOTH solve and judge:
@@ -423,7 +426,10 @@ if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ] && [ -d "${SRC_EXP}" ]; th
     # Preserve the combined cross-agent record (every peer's own file) so
     # post-hoc analysis can see what each agent learned and shared.
     if [ -n "${SHARED_KNOWLEDGE_DIR_HOST:-}" ] && [ -d "${SHARED_KNOWLEDGE_DIR_HOST}" ]; then
-        cp -a "${SHARED_KNOWLEDGE_DIR_HOST}" "$EVAL_DIR/experiment_notes/peer_knowledge"
+        mkdir -p "$EVAL_DIR/experiment_notes/peer_knowledge"
+        for kf in "${SHARED_KNOWLEDGE_DIR_HOST}"/*.md; do
+            [ -f "$kf" ] && cp "$kf" "$EVAL_DIR/experiment_notes/peer_knowledge/"
+        done
     fi
     for exp_dir in "${SRC_EXP}"/exp_*; do
         [ -d "$exp_dir" ] || continue

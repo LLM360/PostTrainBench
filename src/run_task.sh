@@ -433,6 +433,12 @@ if [ -d "${JOB_DIR}/task/final_model" ]; then
     # recursively encounters): the agent controls the contents of
     # final_model/, so nested symlinks pointing at arbitrary
     # host-visible paths could otherwise be slurped into results.
+    # PREEMPTION-RESILIENCE: a requeued allocation re-reaches this copy with a
+    # stale $EVAL_DIR/final_model from the prior allocation. cp would NEST the new
+    # model under it (final_model/final_model/) and leave the grader reading the
+    # stale top-level. Remove the prior copy so the resumed allocation's model wins.
+    # (No-op on a first/normal run — final_model does not exist in $EVAL_DIR yet.)
+    rm -rf "$EVAL_DIR/final_model"
     cp -aH "${JOB_DIR}/task/final_model" "$EVAL_DIR/final_model"
 fi
 
@@ -511,6 +517,10 @@ if [ -L "${JOB_DIR}/task/experiments" ]; then
     rm -f "${JOB_DIR}/task/experiments"
 fi
 
+# PREEMPTION-RESILIENCE: drop a stale prior-allocation copy so cp doesn't nest
+# (task/task/) and leave stale top-level files; the resumed allocation's copy wins.
+# (No-op on a first/normal run — $EVAL_DIR/task does not exist yet.)
+rm -rf "$EVAL_DIR/task"
 cp -r "${JOB_DIR}/task" "$EVAL_DIR/task"
 
 rm -rf /tmp/posttrain_container
@@ -595,6 +605,13 @@ run_evaluation_with_retry() {
     return 1
 }
 
+# PREEMPTION-RESILIENCE: clear a stale metrics.json left by a preempted prior
+# allocation so the resumed allocation re-evaluates THIS allocation's final_model.
+# The in-loop metrics.json guard (run_evaluation_with_retry) still skips redundant
+# re-eval across this run's later phases. Without this, a tail-phase requeue would
+# short-circuit eval and report the prior allocation's stale score.
+# (No-op on a first/normal run — metrics.json does not exist yet.)
+rm -f "${EVAL_DIR}/metrics.json"
 # First evaluation: up to 4 attempts
 run_evaluation_with_retry 4 ""
 

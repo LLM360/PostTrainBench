@@ -174,9 +174,10 @@ then a single \`ANSWER: X\` line.
 - \`benchmark_overview.md\` — what the benchmark is and what good training data looks like.
 - \`evaluate.py\` — read-only. The benchmark scorer.
 - \`$SHARED_LOG_CSV\` — peer agents' experiment rows (strategy + audit metrics + hypothesis/findings/outcome, incl. their \`data_sources\`). Re-read at every iteration. Peers' rows are numeric-scrubbed in shared fields, so other agents' raw eval numbers are not visible to you.
-- \`experiments/KNOWLEDGE.md\` — your accumulating, tagged learning log. Read it at the start of EVERY experiment. Append 1-3 lines at the end of EVERY experiment.
+- \`experiments/KNOWLEDGE.md\` — your accumulating, tagged learning log (this file IS your own file in the shared knowledge dir). Read it at the start of EVERY experiment. Append 1-3 lines at the end of EVERY experiment.
+- \`/shared_log/knowledge/*.md\` — peers' live learning logs. Each peer agent (including you) writes its own \`<agent_id>.md\` here; \`cat\` them at the start of EVERY experiment to learn from peers between iterations.
 - \`experiments/exp_<K>/eval_result.json\` — YOUR OWN per-experiment self-eval output. These contain raw accuracy numbers — that is intentional: you must ground your improved/no judgment in the actual score delta vs parent.
-- \`/shared_log/promoted/<dataset_sha256>.jsonl\` — data files from prior promoted experiments. You MAY fork these. No other \`/shared_log/\` content is readable.
+- \`/shared_log/promoted/<dataset_sha256>.jsonl\` — data files from prior promoted experiments. You MAY fork these. Besides these and \`/shared_log/knowledge/*.md\`, no other \`/shared_log/\` content is readable.
 - Anything you can fetch from the internet or Hugging Face Hub.
 
 ## What you can run
@@ -216,8 +217,13 @@ For each experiment exp_<N>:
 \`\`\`bash
 cat experiments/KNOWLEDGE.md        # tagged learnings from your prior experiments
                                     # (may be empty on exp_001 — that's fine)
+cat /shared_log/knowledge/*.md      # peers' live learnings (each agent writes its own
+                                    # <agent_id>.md here — this is how you learn from
+                                    # peers between iterations; includes your own file)
 tail -n 50 $SHARED_LOG_CSV          # peers' published rows (incl. their data_sources)
 \`\`\`
+Peers number experiments independently, so when you reference a peer's experiment use
+the qualified \`<agent_id>/exp_NNN\` form (same convention as cross-agent parents).
 Pick the next direction grounded in what you've already learned, not vibes. Note
 which \`data_sources\` have already been used — you will need a fresh one soon (see
 Rules: source-novelty).
@@ -552,7 +558,7 @@ and gives peers no readable signal.
 8. Work only in the current directory and subdirectories. The huggingface cache lives in the home folder and is shared.
 9. Your \`final_model/\` must be loadable by \`evaluate.py\` in this environment. You are not allowed to fine-tune any model other than \`{model}\` (nor any non-derivative of it).
 10. **Every \`exp_002+\` must cite a parent.** \`## Parent\` may be \`none\` only on \`exp_001\`, or on \`exp_002+\` if \`## PivotReason\` is also filled in. Bare \`exp_NNN\` is accepted ONLY when the id exists in your own \`experiments/index.csv\`; references to a peer's experiment from \`$SHARED_LOG_CSV\` MUST use the qualified \`<agent_id>/exp_NNN\` form. \`publish_experiment.py\` enforces this.
-11. **You MUST read \`experiments/KNOWLEDGE.md\` at the start of EVERY experiment.** The first read on exp_001 may show a missing/empty file — that's fine. From exp_002 onward, the file must exist.
+11. **You MUST read \`experiments/KNOWLEDGE.md\` at the start of EVERY experiment**, and ALSO \`cat /shared_log/knowledge/*.md\` to pick up peers' live learnings. The first read on exp_001 may show a missing/empty file — that's fine. From exp_002 onward, the file must exist. Reference a peer's experiment by the qualified \`<agent_id>/exp_NNN\` form.
 12. **You MUST append 1-3 tagged lines to \`experiments/KNOWLEDGE.md\` at the END of every experiment, before publishing.** Format is strict (see step 9). Tag whitelist enforced. Lines must reference the current \`exp_NNN\`.
 13. **You MUST run \`evaluate.py --limit -1 --max-tokens 16000 --json-output-file experiments/exp_<N>/eval_result.json\` after training and BEFORE writing \`## Outcome\`.** The improved/no/marginal judgment must be grounded in the actual score delta vs parent. The publisher cross-checks your stated \`eval_after\` against the file (tolerance 0.01); fudging is detected.
 14. **Do NOT reach for \`--done\`.** It is an emergency backstop, not a goal. The publisher refuses it before exp_010, and after exp_010 only honors it if the last 10 experiments ALL have \`outcome_improved != "yes"\` (plateau). The SLURM timer ends the run, not you. See "Operating discipline".

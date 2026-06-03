@@ -11,6 +11,22 @@
 #         sbatch -p main --qos=k2m --reservation=moe --account=k2m \
 #                --array=0-7 scripts/submit_data_eng_array.sh ...
 #     This keeps the script site-agnostic.
+#   * This job sets `#SBATCH --requeue` so partition-priority PREEMPTION
+#     (e.g. partition main: PreemptMode=REQUEUE, GraceTime=0) auto-requeues
+#     the SAME job/array index instead of losing the run. On relaunch the
+#     batch script re-runs run_task.sh with identical args (IDX is rederived
+#     from $SLURM_ARRAY_TASK_ID), so run_task.sh computes the SAME
+#     deterministic EVAL_DIR and resumes from the durable results volume
+#     (POST_TRAIN_BENCH_RESULTS_DIR, passed via sbatch --export, which SLURM
+#     preserves across requeue). No batch-level SIGTERM trap is needed:
+#     SLURM auto-requeues on its own with GraceTime=0, and a trap calling
+#     `scontrol requeue` would race/double-requeue and would also wrongly
+#     abandon a still-healthy allocation hit by a STRAY (non-preempt) TERM
+#     (that case is handled in-script by run_task.sh's respawn-on-signal).
+#     NOTE: requeue resets both the SBATCH walltime budget and the
+#     in-container agent timer; experiment progress on the results volume is
+#     preserved, so the resumed run continues at exp_N+1 (total wall-clock
+#     across preemption cycles can therefore exceed the nominal --hours).
 #   * Only single-GPU allocations are supported by default. The SBATCH
 #     directive below requests `--gres=gpu:1`. To use multiple GPUs,
 #     override the gres on the sbatch command line AND pass --num-gpus
@@ -36,6 +52,7 @@
 # so --agents claude,codex with --array=0-7 gives 4 claude + 4 codex.
 
 #SBATCH --job-name=data_eng_agent
+#SBATCH --requeue
 #SBATCH --array=0-7
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4

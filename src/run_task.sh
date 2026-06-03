@@ -154,6 +154,21 @@ with_record_the_time() {
     return $exit_code
 }
 
+# Returns 0 (true) if the run timer still has time, 1 if expired/missing.
+# Reuses agents/codex_fast/solve.sh's exact expiry grep so the respawn gate
+# (below) and the in-allocation codex respawn loop agree on "time is up".
+# The timer.sh used here is the SAME host-side file created at line 93 and
+# bound into the container, so both layers read identical remaining time.
+timer_has_time_remaining() {
+    local timer_sh="${JOB_DIR}/task/timer.sh"
+    local out=""
+    [ -f "$timer_sh" ] && out="$(bash "$timer_sh" 2>&1 || true)"
+    if echo "$out" | grep -qiE "Timer expired|TIME_UP|^0:00$| 0:00$"; then
+        return 1
+    fi
+    [ -n "$out" ]
+}
+
 SOLVE_OUT="${EVAL_DIR}/solve_out.txt"
 
 # Shared append-only experiment log for parallel data-engineering agents.
@@ -273,27 +288,53 @@ echo "================================"
 echo "========= RUNNING TASK ========="
 echo "================================"
 
-with_huggingface_overlay with_record_the_time solve_task
-SOLVE_EXIT=$?
+# RESPAWN-ON-SIGNAL (preemption resilience): if solve_task dies from an
+# external signal (e.g. node preemption SIGTERM -> exit 143) while the run
+# timer still has time, re-enter a FRESH codex session that resumes from the
+# durable experiments_live/ bind. Scoped to data-eng runs (the other 6
+# default-prompt benchmarks have agents with no respawn/continuation contract,
+# so they are left strictly unchanged). Capped + backed off to avoid a busy
+# loop. Normal(0)/timeout(124)/ordinary-error all fall through on the first
+# pass exactly as before, and a signal AFTER the deadline does NOT respawn
+# because the timer reads expired.
+SOLVE_MAX_RESPAWN=4
+SOLVE_ATTEMPT=0
+while true; do
+    SOLVE_ATTEMPT=$((SOLVE_ATTEMPT + 1))
 
-echo "--- SOLVE DIAGNOSTICS ---"
-echo "exit_code: $SOLVE_EXIT"
-if [ $SOLVE_EXIT -eq 0 ]; then
-    echo "status: exited normally"
-elif [ $SOLVE_EXIT -eq 124 ]; then
-    echo "status: killed by timeout (reached ${NUM_HOURS}h limit)"
-elif [ $SOLVE_EXIT -gt 128 ]; then
-    echo "status: killed by signal $((SOLVE_EXIT - 128)) ($(kill -l $((SOLVE_EXIT - 128)) 2>/dev/null || echo unknown))"
-else
-    echo "status: exited with error code $SOLVE_EXIT"
-fi
-echo "final_model_files: $(ls "${JOB_DIR}/task/final_model/" 2>/dev/null | wc -l)"
-echo "hostname: $(hostname)"
-echo "fuse_overlayfs_alive: $(ps aux 2>/dev/null | grep fuse-overlay | grep -v grep | wc -l)"
-echo "disk_job_dir: $(du -sh "${JOB_DIR}" 2>/dev/null | cut -f1)"
-echo "disk_tmp: $(du -sh "${JOB_TMP}" 2>/dev/null | cut -f1)"
-echo "memory: $(free -m 2>/dev/null | grep Mem | awk '{print "total=" $2 "MB used=" $3 "MB free=" $4 "MB"}')"
-echo "--- END SOLVE DIAGNOSTICS ---"
+    with_huggingface_overlay with_record_the_time solve_task
+    SOLVE_EXIT=$?
+
+    echo "--- SOLVE DIAGNOSTICS ---"
+    echo "exit_code: $SOLVE_EXIT"
+    echo "solve_attempt: $SOLVE_ATTEMPT / $SOLVE_MAX_RESPAWN"
+    if [ $SOLVE_EXIT -eq 0 ]; then
+        echo "status: exited normally"
+    elif [ $SOLVE_EXIT -eq 124 ]; then
+        echo "status: killed by timeout (reached ${NUM_HOURS}h limit)"
+    elif [ $SOLVE_EXIT -gt 128 ]; then
+        echo "status: killed by signal $((SOLVE_EXIT - 128)) ($(kill -l $((SOLVE_EXIT - 128)) 2>/dev/null || echo unknown))"
+    else
+        echo "status: exited with error code $SOLVE_EXIT"
+    fi
+    echo "final_model_files: $(ls "${JOB_DIR}/task/final_model/" 2>/dev/null | wc -l)"
+    echo "hostname: $(hostname)"
+    echo "fuse_overlayfs_alive: $(ps aux 2>/dev/null | grep fuse-overlay | grep -v grep | wc -l)"
+    echo "disk_job_dir: $(du -sh "${JOB_DIR}" 2>/dev/null | cut -f1)"
+    echo "disk_tmp: $(du -sh "${JOB_TMP}" 2>/dev/null | cut -f1)"
+    echo "memory: $(free -m 2>/dev/null | grep Mem | awk '{print "total=" $2 "MB used=" $3 "MB free=" $4 "MB"}')"
+    echo "--- END SOLVE DIAGNOSTICS ---"
+
+    if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ] \
+       && [ "$SOLVE_EXIT" -gt 128 ] \
+       && [ "$SOLVE_ATTEMPT" -lt "$SOLVE_MAX_RESPAWN" ] \
+       && timer_has_time_remaining; then
+        echo "[run_task] solve_task died from signal $((SOLVE_EXIT - 128)) with time remaining; respawning (attempt $((SOLVE_ATTEMPT + 1))/${SOLVE_MAX_RESPAWN}) from durable experiments_live"
+        sleep 5
+        continue
+    fi
+    break
+done
 
 echo "============================================"
 echo "=== TASK COMPLETE, PARSING AGENT TRACE ==="

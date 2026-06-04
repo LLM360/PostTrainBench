@@ -18,11 +18,16 @@
 #     from $SLURM_ARRAY_TASK_ID), so run_task.sh computes the SAME
 #     deterministic EVAL_DIR and resumes from the durable results volume
 #     (POST_TRAIN_BENCH_RESULTS_DIR, passed via sbatch --export, which SLURM
-#     preserves across requeue). No batch-level SIGTERM trap is needed:
-#     SLURM auto-requeues on its own with GraceTime=0, and a trap calling
-#     `scontrol requeue` would race/double-requeue and would also wrongly
-#     abandon a still-healthy allocation hit by a STRAY (non-preempt) TERM
-#     (that case is handled in-script by run_task.sh's respawn-on-signal).
+#     preserves across requeue). RESILIENCE MODEL: on a signal-death
+#     (preemption SIGTERM, or a stray non-preempt TERM) with run-timer time
+#     remaining, run_task.sh itself calls `scontrol requeue $SLURM_JOB_ID`
+#     and exits BEFORE KillWait, so SLURM gives a fresh allocation that
+#     resumes from the durable volume. The explicit requeue is REQUIRED:
+#     this cluster has RequeueExit=(null), so a plain exit (or a stray TERM)
+#     does NOT auto-requeue -- only an explicit `scontrol requeue` or a real
+#     PreemptMode=REQUEUE preempt does. No batch-level SIGTERM trap is used
+#     (the logic lives in run_task.sh's signal handling, gated by the run
+#     timer; a post-deadline TERM falls through and is NOT requeued).
 #     NOTE: requeue resets both the SBATCH walltime budget and the
 #     in-container agent timer; experiment progress on the results volume is
 #     preserved, so the resumed run continues at exp_N+1 (total wall-clock

@@ -288,17 +288,50 @@ echo "================================"
 echo "========= RUNNING TASK ========="
 echo "================================"
 
-# RESPAWN-ON-SIGNAL (preemption resilience): if solve_task dies from an
-# external signal (e.g. node preemption SIGTERM -> exit 143) while the run
-# timer still has time, re-enter a FRESH codex session that resumes from the
-# durable experiments_live/ bind. Scoped to data-eng runs (the other 6
-# default-prompt benchmarks have agents with no respawn/continuation contract,
-# so they are left strictly unchanged). Capped + backed off to avoid a busy
-# loop. Normal(0)/timeout(124)/ordinary-error all fall through on the first
-# pass exactly as before, and a signal AFTER the deadline does NOT respawn
-# because the timer reads expired.
+# SIGNAL RESILIENCE (preemption): if solve_task dies from SIGTERM (exit 143)
+# while the run timer still has time, recover so the run resumes from the
+# durable experiments_live/ bind. We trigger ONLY on 143 (128+15 = SIGTERM):
+# that is exactly what node preemption sends (and any stray plain TERM). We do
+# NOT recover on other >128 signals — most importantly 137 (128+9 = SIGKILL,
+# the OOM-killer's signal): a recurring OOM is deterministic, so requeueing it
+# would loop forever burning fresh allocations.
+# HOW we recover depends on whether we are under SLURM:
+#   * UNDER SLURM (SLURM_JOB_ID set + scontrol available) we COOPERATE with
+#     SLURM's native --requeue: we explicitly `scontrol requeue $SLURM_JOB_ID`
+#     and, ONLY IF that requeue SUCCEEDS, EXIT. SLURM hands us a FRESH
+#     allocation that re-runs run_task.sh from the top (deterministic EVAL_DIR)
+#     and resumes from the durable experiments_live/ on k2m. Respawning IN
+#     PLACE instead (the original PR #13 behavior) keeps the batch script alive
+#     past KillWait, so on a TRUE preempt SLURM SIGKILLs us -> job FAILED, never
+#     requeued (observed: job 1709297 got SIGTERM x3, respawned each time, then
+#     went State=FAILED ExitCode 0:15). Issuing scontrol requeue ourselves also
+#     converts a STRAY (non-preempt) TERM into a fresh allocation, because this
+#     cluster has RequeueExit/RequeueExitHold null (SLURM does NOT auto-requeue
+#     on any plain exit code). Precisely BECAUSE RequeueExit is null, a bare
+#     `exit 143` does NOT requeue on its own, so if `scontrol requeue` FAILS we
+#     must NOT exit (that would SILENTLY COMPLETE the run) — we fall back to the
+#     same capped in-place respawn used for local runs. The total number of
+#     requeues is bounded by SLURM_RESTART_COUNT < MAX_REQUEUES (see below),
+#     because the per-allocation timer resets every requeue and so cannot bound
+#     the cross-allocation loop.
+#   * LOCAL / interactive (no SLURM_JOB_ID): there is no allocation to
+#     requeue, so fall back to a capped, backed-off IN-PLACE respawn.
+# Scoped to data-eng runs (the other 6 default-prompt benchmarks have agents
+# with no respawn/continuation contract, so they are left strictly unchanged).
+# Normal(0)/timeout(124)/non-143 signal (incl 137 OOM)/ordinary-error all fall
+# through on the first pass exactly as before, and a SIGTERM AFTER the deadline
+# does NOT recover because the timer reads expired.
 SOLVE_MAX_RESPAWN=4
 SOLVE_ATTEMPT=0
+# CROSS-ALLOCATION REQUEUE CAP. Each requeue hands us a FRESH allocation with a
+# brand-new per-allocation timer (fresh NUM_HOURS), so timer_has_time_remaining
+# can NEVER bound the TOTAL number of requeues -> an unbounded fresh-allocation
+# loop on a pathological recurring preempt. SLURM_RESTART_COUNT is maintained by
+# SLURM itself (it persists and increments by 1 across every requeue of THIS
+# job id), so it is the only counter that survives a fresh allocation. Cap on it.
+# Default 50 is generous (heavy genuine preemption survives) yet finite (bounds
+# pathology). Override via POSTTRAIN_MAX_REQUEUES.
+MAX_REQUEUES="${POSTTRAIN_MAX_REQUEUES:-50}"
 while true; do
     SOLVE_ATTEMPT=$((SOLVE_ATTEMPT + 1))
 
@@ -308,6 +341,7 @@ while true; do
     echo "--- SOLVE DIAGNOSTICS ---"
     echo "exit_code: $SOLVE_EXIT"
     echo "solve_attempt: $SOLVE_ATTEMPT / $SOLVE_MAX_RESPAWN"
+    echo "slurm_restart_count: ${SLURM_RESTART_COUNT:-0} / ${MAX_REQUEUES}"
     if [ $SOLVE_EXIT -eq 0 ]; then
         echo "status: exited normally"
     elif [ $SOLVE_EXIT -eq 124 ]; then
@@ -325,13 +359,62 @@ while true; do
     echo "memory: $(free -m 2>/dev/null | grep Mem | awk '{print "total=" $2 "MB used=" $3 "MB free=" $4 "MB"}')"
     echo "--- END SOLVE DIAGNOSTICS ---"
 
+    # RECOVERY GATE — SIGTERM ONLY. We requeue/respawn EXACTLY on exit 143
+    # (128+15 = SIGTERM): that is what node preemption sends, and also any stray
+    # plain TERM. We deliberately do NOT recover on other >128 signals — most
+    # importantly 137 (128+9 = SIGKILL, the OOM-killer's signal): a recurring OOM
+    # is deterministic, so requeueing it would loop forever burning fresh
+    # allocations. 137 / other signals / timeout(124) / normal(0) / ordinary
+    # error all fall straight through to `break` exactly as a non-recovering run.
     if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ] \
-       && [ "$SOLVE_EXIT" -gt 128 ] \
-       && [ "$SOLVE_ATTEMPT" -lt "$SOLVE_MAX_RESPAWN" ] \
+       && [ "$SOLVE_EXIT" -eq 143 ] \
        && timer_has_time_remaining; then
-        echo "[run_task] solve_task died from signal $((SOLVE_EXIT - 128)) with time remaining; respawning (attempt $((SOLVE_ATTEMPT + 1))/${SOLVE_MAX_RESPAWN}) from durable experiments_live"
-        sleep 5
-        continue
+        # solve_task died from SIGTERM (preemption / stray TERM -> 143) while the
+        # run timer still has time.
+        if [ -n "${SLURM_JOB_ID:-}" ] \
+           && command -v scontrol >/dev/null 2>&1 \
+           && [ "${SLURM_RESTART_COUNT:-0}" -lt "$MAX_REQUEUES" ]; then
+            # COOPERATE WITH SLURM: respawning in place keeps the batch script
+            # alive past KillWait, so SLURM SIGKILLs us -> FAILED, no requeue.
+            # Instead explicitly requeue THIS job (per-task array id, NOT the
+            # array master $SLURM_ARRAY_JOB_ID) so SLURM hands us a FRESH
+            # allocation that re-runs run_task.sh from the top (deterministic
+            # EVAL_DIR) and resumes from durable experiments_live.
+            #
+            # ONLY exit-as-requeued IF the requeue actually SUCCEEDS. This
+            # cluster has RequeueExit/RequeueExitHold null, so a bare `exit 143`
+            # does NOT requeue on its own — if `scontrol requeue` fails (e.g.
+            # job not in a requeueable state) and we exit anyway, the run would
+            # SILENTLY COMPLETE and lose its remaining time. So on failure we
+            # fall back to the SAME capped in-place respawn used for local runs,
+            # which keeps making progress instead of vanishing.
+            echo "[run_task] solve_task died from SIGTERM under SLURM job ${SLURM_JOB_ID} with time remaining (restart ${SLURM_RESTART_COUNT:-0}/${MAX_REQUEUES}); requeueing for a fresh allocation (resume from durable experiments_live)"
+            if scontrol requeue "${SLURM_JOB_ID}"; then
+                sleep 10
+                exit 143
+            else
+                echo "[run_task] scontrol requeue failed (RequeueExit is null on this cluster, so exiting would SILENTLY COMPLETE the run); falling back to capped in-place respawn instead"
+                if [ "$SOLVE_ATTEMPT" -lt "$SOLVE_MAX_RESPAWN" ]; then
+                    echo "[run_task] respawning in place (attempt $((SOLVE_ATTEMPT + 1))/${SOLVE_MAX_RESPAWN}) from durable experiments_live"
+                    sleep 5
+                    continue
+                fi
+            fi
+        elif [ -n "${SLURM_JOB_ID:-}" ] \
+             && command -v scontrol >/dev/null 2>&1 \
+             && [ "${SLURM_RESTART_COUNT:-0}" -ge "$MAX_REQUEUES" ]; then
+            # CROSS-ALLOCATION CAP REACHED: SLURM_RESTART_COUNT has hit
+            # MAX_REQUEUES, so a pathological recurring preempt is likely. Do NOT
+            # requeue again — finish THIS allocation normally (break) and let it
+            # complete rather than burning unbounded fresh allocations.
+            echo "[run_task] SLURM_RESTART_COUNT (${SLURM_RESTART_COUNT:-0}) >= MAX_REQUEUES (${MAX_REQUEUES}); NOT requeueing — finishing this allocation to bound the requeue loop"
+        elif [ "$SOLVE_ATTEMPT" -lt "$SOLVE_MAX_RESPAWN" ]; then
+            # No SLURM job id (local/interactive run): no allocation to
+            # requeue, so fall back to a capped in-place respawn.
+            echo "[run_task] solve_task died from SIGTERM with time remaining (no SLURM job); respawning in place (attempt $((SOLVE_ATTEMPT + 1))/${SOLVE_MAX_RESPAWN}) from durable experiments_live"
+            sleep 5
+            continue
+        fi
     fi
     break
 done

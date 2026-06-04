@@ -288,15 +288,30 @@ echo "================================"
 echo "========= RUNNING TASK ========="
 echo "================================"
 
-# RESPAWN-ON-SIGNAL (preemption resilience): if solve_task dies from an
-# external signal (e.g. node preemption SIGTERM -> exit 143) while the run
-# timer still has time, re-enter a FRESH codex session that resumes from the
-# durable experiments_live/ bind. Scoped to data-eng runs (the other 6
-# default-prompt benchmarks have agents with no respawn/continuation contract,
-# so they are left strictly unchanged). Capped + backed off to avoid a busy
-# loop. Normal(0)/timeout(124)/ordinary-error all fall through on the first
-# pass exactly as before, and a signal AFTER the deadline does NOT respawn
-# because the timer reads expired.
+# SIGNAL RESILIENCE (preemption): if solve_task dies from an external signal
+# (e.g. node preemption SIGTERM -> exit 143) while the run timer still has
+# time, recover so the run resumes from the durable experiments_live/ bind.
+# HOW we recover depends on whether we are under SLURM:
+#   * UNDER SLURM (SLURM_JOB_ID set + scontrol available) we COOPERATE with
+#     SLURM's native --requeue: we explicitly `scontrol requeue $SLURM_JOB_ID`
+#     and then EXIT. SLURM hands us a FRESH allocation that re-runs
+#     run_task.sh from the top (deterministic EVAL_DIR) and resumes from the
+#     durable experiments_live/ on k2m. Respawning IN PLACE instead (the
+#     original PR #13 behavior) keeps the batch script alive past KillWait,
+#     so on a TRUE preempt SLURM SIGKILLs us -> job FAILED, never requeued
+#     (observed: job 1709297 got SIGTERM x3, respawned each time, then went
+#     State=FAILED ExitCode 0:15). Issuing scontrol requeue ourselves also
+#     converts a STRAY (non-preempt) TERM into a fresh allocation, because
+#     this cluster has RequeueExit/RequeueExitHold null (SLURM does NOT
+#     auto-requeue on any plain exit code). A double-requeue during a real
+#     preempt is harmless (no-op/benign error swallowed by `|| echo`).
+#   * LOCAL / interactive (no SLURM_JOB_ID): there is no allocation to
+#     requeue, so fall back to a capped, backed-off IN-PLACE respawn.
+# Scoped to data-eng runs (the other 6 default-prompt benchmarks have agents
+# with no respawn/continuation contract, so they are left strictly unchanged).
+# Normal(0)/timeout(124)/ordinary-error all fall through on the first pass
+# exactly as before, and a signal AFTER the deadline does NOT recover because
+# the timer reads expired.
 SOLVE_MAX_RESPAWN=4
 SOLVE_ATTEMPT=0
 while true; do
@@ -327,11 +342,27 @@ while true; do
 
     if [ "$POST_TRAIN_BENCH_PROMPT" = "data_eng_prompt" ] \
        && [ "$SOLVE_EXIT" -gt 128 ] \
-       && [ "$SOLVE_ATTEMPT" -lt "$SOLVE_MAX_RESPAWN" ] \
        && timer_has_time_remaining; then
-        echo "[run_task] solve_task died from signal $((SOLVE_EXIT - 128)) with time remaining; respawning (attempt $((SOLVE_ATTEMPT + 1))/${SOLVE_MAX_RESPAWN}) from durable experiments_live"
-        sleep 5
-        continue
+        # solve_task died from an external signal (preemption SIGTERM -> 143)
+        # while the run timer still has time.
+        if [ -n "${SLURM_JOB_ID:-}" ] && command -v scontrol >/dev/null 2>&1; then
+            # COOPERATE WITH SLURM: respawning in place keeps the batch script
+            # alive past KillWait, so SLURM SIGKILLs us -> FAILED, no requeue.
+            # Instead explicitly requeue THIS job (per-task array id, NOT the
+            # array master $SLURM_ARRAY_JOB_ID) and EXIT, so SLURM hands us a
+            # FRESH allocation that re-runs run_task.sh from the top
+            # (deterministic EVAL_DIR) and resumes from durable experiments_live.
+            echo "[run_task] solve_task died from signal $((SOLVE_EXIT - 128)) under SLURM job ${SLURM_JOB_ID} with time remaining; requeueing for a fresh allocation (resume from durable experiments_live)"
+            scontrol requeue "${SLURM_JOB_ID}" || echo "[run_task] scontrol requeue failed; falling back to SLURM native --requeue on preemption"
+            sleep 10
+            exit 143
+        elif [ "$SOLVE_ATTEMPT" -lt "$SOLVE_MAX_RESPAWN" ]; then
+            # No SLURM job id (local/interactive run): no allocation to
+            # requeue, so fall back to a capped in-place respawn.
+            echo "[run_task] solve_task died from signal $((SOLVE_EXIT - 128)) with time remaining (no SLURM job); respawning in place (attempt $((SOLVE_ATTEMPT + 1))/${SOLVE_MAX_RESPAWN}) from durable experiments_live"
+            sleep 5
+            continue
+        fi
     fi
     break
 done
